@@ -1,17 +1,33 @@
 import customtkinter as ctk
 
 class TagEntry(ctk.CTkFrame):
-    """Tag/Chip Input - press 'Enter' or ',' (comma) to add a tag"""
+    """Tag/chip input - press Enter or comma to add a tag."""
 
-    def __init__(self, master, placeholder="Type and press Enter...", placeholder_text=None, tag_color=None, **kwargs):
+    def __init__(
+        self,
+        master,
+        placeholder="Type and press Enter...",
+        placeholder_text=None,
+        tag_color=None,
+        **kwargs
+    ):
         if placeholder_text is not None:
             placeholder = placeholder_text
         super().__init__(master, fg_color="transparent", **kwargs)
         self._tags = []
 
-        self._wrap = ctk.CTkScrollableFrame(self, height=80, fg_color=("grey95", "grey20"))
+        self._wrap = ctk.CTkScrollableFrame(
+            self, height=80, fg_color=("gray95", "gray20")
+        )
         self._wrap.pack(fill="x", expand=True)
-        self._entry = ctk.CTkEntry(self._wrap, placeholder_text=placeholder, border_width=0, fg_color="transparent", height=28)
+
+        self._entry = ctk.CTkEntry(
+            self._wrap,
+            placeholder_text=placeholder,
+            border_width=0,
+            fg_color="transparent",
+            height=28,
+        )
         self._entry.pack(side="left", fill="x", expand=True, padx=4, pady=4)
         self._entry.bind("<Return>", self._on_enter)
         self._entry.bind("<KeyRelease>", self._check_comma)
@@ -86,6 +102,7 @@ class TagEntry(ctk.CTkFrame):
                 widget.destroy()
         self._tags.clear()
         self._entry.delete(0, "end")
+
 
 class LabeledField(ctk.CTkFrame):
     def __init__(self, master, label, hint="", **kwargs):

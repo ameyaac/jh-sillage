@@ -8,7 +8,7 @@ from model.predictor import load_profile
 class AppWindow(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Sillage - Perfume Preference Predictor")
+        self.title("JH Sillage - Perfume Preference Predictor")
         self.geometry("980x720")
         self.minsize(820, 600)
 
