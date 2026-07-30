@@ -24,6 +24,7 @@ from data import (  # noqa: E402
 )
 from data.migrate import LEGACY_MODEL_VERSION, migrate  # noqa: E402
 from data.schema import PREDICTION_FIELDS, SCHEMA_VERSION  # noqa: E402
+from data.migrate import profile_to_declarations  # noqa: E402
 from data.store import SchemaVersionError  # noqa: E402
 
 
@@ -440,6 +441,148 @@ def test_summary_reports_pairs():
         assert summary["combinations"] == 1
         assert summary["rated_combinations"] == 1
         assert summary["mean_rating"] == 4.0, "pair ratings must not move this"
+
+
+# ── declared preferences ──────────────────────────────────────────────────────
+
+
+def test_palette_round_trip():
+    with tempfile.TemporaryDirectory() as tmp:
+        log = _log(tmp)
+        log.log_preference("family", "citrus", 1.0)
+        log.log_preference("family", "animalic", -1.0)
+        log.log_preference("note", "Vetiver", 0.5)
+        log.log_preference("medium", "Spray Perfume (EDP)", 1.0)
+        log.log_preference("axis", "powdery", -0.5)
+
+        palette = log.palette()
+        assert palette["family"] == {"citrus": 1.0, "animalic": -1.0}
+        assert palette["note"] == {"Vetiver": 0.5}
+        assert palette["medium"] == {"Spray Perfume (EDP)": 1.0}
+        assert palette["axis"] == {"powdery": -0.5}
+        assert log.has_palette()
+
+
+def test_declared_preferences_never_reach_the_training_set():
+    # A declaration is a prior, not an observation. This is the same separation as
+    # predictions, for the same reason.
+    with tempfile.TemporaryDirectory() as tmp:
+        log = _log(tmp)
+        p = log.log_perfume(_perfume())
+        log.log_preference("family", "citrus", 1.0)
+        log.log_preference("note", "bergamot", 1.0)
+        assert log.training_set() == []
+
+        log.log_rating(p.perfume_id, 4.0)
+        assert [r for _, r in log.training_set()] == [4.0]
+        assert log.summary()["mean_rating"] == 4.0, "declarations must not move this"
+
+
+def test_redeclaring_appends_and_latest_wins():
+    with tempfile.TemporaryDirectory() as tmp:
+        log = _log(tmp)
+        log.log_preference("family", "woody", 0.5, declared_at="2026-01-01T00:00:00")
+        log.log_preference("family", "woody", -1.0, declared_at="2026-06-01T00:00:00")
+        assert log.palette()["family"] == {"woody": -1.0}
+        assert len(log.preference_events()) == 2, "history must survive"
+
+
+def test_retraction_removes_from_the_palette_but_stays_on_disk():
+    with tempfile.TemporaryDirectory() as tmp:
+        log = _log(tmp)
+        log.log_preference("family", "gourmand", 1.0, declared_at="2026-01-01T00:00:00")
+        log.log_preference("family", "gourmand", 0.0, declared_at="2026-02-01T00:00:00")
+
+        assert log.palette() == {}, "a retracted palette must look like no palette"
+        assert not log.has_palette()
+        assert log.palette(include_retracted=True)["family"] == {"gourmand": 0.0}
+        assert len(log.preference_events()) == 2
+
+
+def test_invalid_preferences_are_refused():
+    with tempfile.TemporaryDirectory() as tmp:
+        log = _log(tmp)
+        cases = [
+            ("unknown scope", lambda: log.log_preference("vibe", "citrus", 1.0)),
+            ("unknown family", lambda: log.log_preference("family", "petrichor", 1.0)),
+            ("unknown axis", lambda: log.log_preference("axis", "loud", 1.0)),
+            ("empty key", lambda: log.log_preference("note", "   ", 1.0)),
+            ("weight above range", lambda: log.log_preference("family", "citrus", 2.0)),
+            # 4.5 would be a plausible *rating*, which is exactly the confusion the
+            # signed scale exists to prevent.
+            ("rating-shaped weight", lambda: log.log_preference("family", "citrus", 4.5)),
+            ("non-numeric weight", lambda: log.log_preference("family", "citrus", "lots")),
+        ]
+        for label, call in cases:
+            try:
+                call()
+            except ValidationError:
+                continue
+            raise AssertionError(f"{label} should have been refused")
+        assert log.preference_events() == []
+
+
+def test_family_and_axis_keys_are_normalised():
+    with tempfile.TemporaryDirectory() as tmp:
+        log = _log(tmp)
+        log.log_preference("FAMILY", "Citrus", 1.0)
+        assert log.palette()["family"] == {"citrus": 1.0}
+        # Note keys keep their casing, since notes are user vocabulary.
+        log.log_preference("note", "Ambroxan", 1.0)
+        assert log.palette()["note"] == {"Ambroxan": 1.0}
+
+
+def test_a_v1_log_is_upgraded_in_place():
+    # v1 -> v2 added preferences.csv, which is purely additive: an absent table reads
+    # as an empty one, so refusing to open would be over-strict.
+    with tempfile.TemporaryDirectory() as tmp:
+        log = _log(tmp)
+        log.log_perfume(_perfume())
+        log.meta_path.write_text(json.dumps({"schema_version": 1}))
+
+        reopened = RatingLog(tmp)
+        assert len(reopened.perfumes()) == 1
+        assert reopened.palette() == {}
+        meta = json.loads(reopened.meta_path.read_text())
+        assert meta["schema_version"] == SCHEMA_VERSION
+        assert meta["upgrades"][0]["from"] == 1
+
+
+# ── legacy taste profile ──────────────────────────────────────────────────────
+
+
+def test_legacy_profile_becomes_declarations():
+    declarations = profile_to_declarations({
+        "loved_families": ["Woody", "citrus"],
+        "disliked_families": ["Animalic"],
+        "liked_notes": ["Vetiver", "Ambroxan"],
+        "disliked_notes": ["Cumin"],
+        "preferred_mediums": ["Spray Perfume (EDP)"],
+    })
+    found = {(d.scope, d.key): d.weight for d in declarations}
+    assert found[("family", "woody")] == 1.0
+    assert found[("family", "citrus")] == 1.0
+    assert found[("family", "animalic")] == -1.0
+    assert found[("note", "Vetiver")] == 1.0
+    assert found[("note", "Cumin")] == -1.0
+    assert found[("medium", "Spray Perfume (EDP)")] == 1.0
+
+
+def test_legacy_profile_slider_scores_are_rescaled():
+    # Legacy sliders were 1–5; 3 is neutral on the signed scale.
+    declarations = profile_to_declarations({
+        "family_scores": {"citrus": 5, "woody": 3, "animalic": 1, "nonsense": 5}
+    })
+    found = {d.key: d.weight for d in declarations}
+    assert found["citrus"] == 1.0
+    assert found["woody"] == 0.0
+    assert found["animalic"] == -1.0
+    assert "nonsense" not in found, "unknown families are dropped, not guessed at"
+
+
+def test_legacy_profile_ignores_unknown_families():
+    declarations = profile_to_declarations({"loved_families": ["Petrichor", "Woody"]})
+    assert [d.key for d in declarations] == ["woody"]
 
 
 # ── migration ─────────────────────────────────────────────────────────────────

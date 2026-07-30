@@ -4,5 +4,7 @@ numpy>=2.0            # feature vectors, the ridge solve
 scipy>=1.14           # linear algebra
 scikit-learn>=1.5     # metrics and cross-validation utilities
 
-# Desktop UI. Also needs the system Tk package: sudo apt install python3-tk
+# Desktop UI. NOT currently needed: ui/ is an empty package — the customtkinter app
+# still lives unported in sillage_app.zip. Kept here for when it is brought forward.
+# Also needs the system Tk package: sudo apt install python3-tk
 customtkinter>=5.2.2

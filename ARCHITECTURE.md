@@ -464,9 +464,9 @@ sillage/
     residual.py         §8.3
   data/                 ── BUILT ──
     schema.py           record types + validation (Perfume, Combination, RatingEvent, Prediction)
-    store.py            RatingLog: four append-only tables
+    store.py            RatingLog: five append-only tables
     portable.py         CSV export/import — the browser bridge
-    migrate.py          legacy single-table CSV -> four tables
+    migrate.py          legacy CSV + taste profile -> five tables
   export/
     to_js.py            emit lexicon + trained model as JS for the page
 ```
@@ -496,7 +496,7 @@ it, so the test does.
 
 ### 9.1 What the storage layer actually looks like
 
-Four append-only tables, not one mutable one:
+Five append-only tables, not one mutable one:
 
 | Table | Holds | Why separate |
 |---|---|---|
@@ -504,6 +504,7 @@ Four append-only tables, not one mutable one:
 | `combinations.csv` | layered pairs, **by reference** to their members | the blend is derived, so a lexicon fix propagates instead of leaving stale copies |
 | `ratings.csv` | timestamped rating *events* | re-rating appends; drift is measurable rather than overwritten |
 | `predictions.csv` | what the model claimed, with version + spec hash | accountability, and it keeps predictions out of the training path |
+| `preferences.csv` | taste the user *declared*, on a signed [-1,1] scale | §4.3's prior mean, expressed as data; off the rating scale so it can never be read as a target |
 
 Ratings and predictions are polymorphic over their subject (`perfume` or
 `combination`), because a layered pair is judged on the same 1–5 scale and the

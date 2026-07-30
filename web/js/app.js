@@ -69,7 +69,13 @@
   }
 
   function currentPrediction() {
-    return Predict.run(tags.top, tags.mid, tags.base, $('scentType').value, Store.trainingSet());
+    return Predict.run(
+      tags.top, tags.mid, tags.base,
+      $('scentType').value,
+      Store.trainingSet(),
+      Store.palette(),          /* declared taste — a prior, never a training target */
+      $('perfumeMedium').value
+    );
   }
 
   function renderPrediction() {
@@ -87,7 +93,11 @@
     var score = result.total;
     var caveats = [];
     if (result.ratingsUsed === 0) {
-      caveats.push('No ratings of your own yet — this is the seed profile guessing, not a model of your taste.');
+      caveats.push(result.declarationsUsed
+        ? 'No ratings of your own yet — this is your declared palette plus the seed ' +
+          'profile guessing, not a model of your taste.'
+        : 'No ratings of your own yet, and no palette declared — this is the seed ' +
+          'profile guessing. Set a base palette in Preferences, or just start rating.');
     } else if (result.ratingsUsed < 8) {
       caveats.push('Based on only ' + result.ratingsUsed + ' rating' +
         (result.ratingsUsed === 1 ? '' : 's') + ' of yours. Treat it as a rough guess.');
@@ -300,12 +310,13 @@
 
   function downloadAll() {
     var files = Store.exportFiles();
-    if (!Store.summary().perfumes) {
-      showToast('Nothing logged yet — nothing to back up.');
+    if (Store.isEmpty()) {
+      showToast('Nothing to back up yet — log a perfume or declare a palette first.');
       return;
     }
-    /* Browsers drop rapid successive downloads, so they are spaced out. All four
-     * files are written even when empty: a partial backup is worse than none. */
+    /* Browsers drop rapid successive downloads, so they are spaced out. All five
+     * files are written even when empty: a partial backup is worse than none, and a
+     * missing preferences.csv is indistinguishable from an empty palette. */
     files.forEach(function (file, index) {
       root.setTimeout(function () { download(file.name, file.text); }, index * 350);
     });
@@ -394,6 +405,9 @@
   function initTransfer() {
     $('downloadBtn').addEventListener('click', downloadAll);
     $('downloadAllBtn').addEventListener('click', downloadAll);
+    /* Same full backup, not a palette-only file: a partial export that looked like a
+     * backup would be the more dangerous thing to offer. */
+    $('downloadPaletteBtn').addEventListener('click', downloadAll);
 
     var input = $('importInput');
     input.addEventListener('change', function () { readFiles(input.files); });
@@ -481,15 +495,59 @@
     });
   }
 
+  /* ── views ───────────────────────────────────────────────────────────────── */
+
+  /* Tabs rather than separate HTML files, on purpose: localStorage is not reliably
+   * shared between two documents on a file:// origin, and this page is meant to work
+   * opened straight off disk. One document means one storage context. */
+  function showView(name) {
+    document.querySelectorAll('[data-view]').forEach(function (section) {
+      section.hidden = section.dataset.view !== name;
+    });
+    document.querySelectorAll('[data-view-target]').forEach(function (button) {
+      var active = button.dataset.viewTarget === name;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    if (name === 'preferences' && Sillage.Preferences) Sillage.Preferences.render();
+
+    /* Without this you land mid-page when switching from a long log to a short
+     * palette, which reads as "nothing happened". */
+    if (showView._ready) root.scrollTo({ top: 0, behavior: 'smooth' });
+    showView._ready = true;
+  }
+
+  function initNav() {
+    document.querySelectorAll('[data-view-target]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        showView(button.dataset.viewTarget);
+      });
+    });
+    showView('log');
+  }
+
   function init() {
     initTheme();
     initForm();
     initTransfer();
+    initNav();
+    if (Sillage.Preferences) {
+      /* A changed palette changes the live prediction and the caveats under it. */
+      Sillage.Preferences.init(function () {
+        renderPrediction();
+        renderLog();
+      });
+    }
     renderLog();
     renderPrediction();
   }
 
-  Sillage.App = { init: init, renderLog: renderLog, renderPrediction: renderPrediction };
+  Sillage.App = {
+    init: init,
+    showView: showView,
+    renderLog: renderLog,
+    renderPrediction: renderPrediction
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

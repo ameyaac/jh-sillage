@@ -1,7 +1,7 @@
 """Export and import the log as plain CSV files.
 
 This is the bridge between Python and the browser app. `index.html` keeps its data
-in the browser and can download exactly these four files; this module reads them
+in the browser and can download exactly these five files; this module reads them
 back. Round-tripping is the backup story: the log is the one thing in the project
 that cannot be regenerated.
 
@@ -27,12 +27,14 @@ from .schema import (
     COMBINATION_FIELDS,
     PERFUME_FIELDS,
     PREDICTION_FIELDS,
+    PREFERENCE_FIELDS,
     RATING_FIELDS,
     SUBJECT_COMBINATION,
     SUBJECT_PERFUME,
     Combination,
     Perfume,
     Prediction,
+    PreferenceDeclaration,
     RatingEvent,
     ValidationError,
 )
@@ -40,6 +42,7 @@ from .store import (
     COMBINATIONS_FILE,
     PERFUMES_FILE,
     PREDICTIONS_FILE,
+    PREFERENCES_FILE,
     RATINGS_FILE,
     RatingLog,
 )
@@ -50,10 +53,16 @@ TABLES: dict[str, tuple[str, list[str], type, str]] = {
     "combinations": (COMBINATIONS_FILE, COMBINATION_FIELDS, Combination, "combination_id"),
     "ratings": (RATINGS_FILE, RATING_FIELDS, RatingEvent, "rating_id"),
     "predictions": (PREDICTIONS_FILE, PREDICTION_FIELDS, Prediction, "prediction_id"),
+    "preferences": (
+        PREFERENCES_FILE,
+        PREFERENCE_FIELDS,
+        PreferenceDeclaration,
+        "preference_id",
+    ),
 }
 
 # Dependency order: a row may only reference something imported before it.
-IMPORT_ORDER = ("perfumes", "combinations", "ratings", "predictions")
+IMPORT_ORDER = ("perfumes", "combinations", "ratings", "predictions", "preferences")
 
 
 @dataclass
@@ -100,7 +109,7 @@ class TransferReport:
 
 
 def export_dir(log: RatingLog, dest: str | Path) -> Path:
-    """Write all four tables to `dest`, headers included even when empty.
+    """Write all five tables to `dest`, headers included even when empty.
 
     Empty files are written on purpose: a backup that silently omits
     `ratings.csv` is indistinguishable from one where you had no ratings.
@@ -267,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-dir", help="the log directory to read or write")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    exporter = sub.add_parser("export", help="write the four CSVs to a directory")
+    exporter = sub.add_parser("export", help="write the five CSVs to a directory")
     exporter.add_argument("dest", type=Path)
 
     importer = sub.add_parser("import", help="read CSVs back into the log")

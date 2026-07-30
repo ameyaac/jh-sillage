@@ -47,13 +47,15 @@ def _populated(data_dir) -> RatingLog:
     log.log_prediction(
         Prediction(subject_id=a.perfume_id, value=4.2, model_version="ridge-v1")
     )
+    log.log_preference("family", "citrus", 1.0)
+    log.log_preference("note", "Cumin", -1.0)
     return log
 
 
 # ── export ────────────────────────────────────────────────────────────────────
 
 
-def test_export_writes_all_four_tables_even_when_empty():
+def test_export_writes_all_tables_even_when_empty():
     # A backup missing ratings.csv is indistinguishable from having no ratings.
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -117,6 +119,8 @@ def test_full_round_trip_is_lossless():
             "combinations",
             "rated_combinations",
             "predictions_logged",
+            "declared_preferences",
+            "preference_events",
             "mean_rating",
             "distinct_notes",
         ):
@@ -130,6 +134,10 @@ def test_full_round_trip_is_lossless():
         assert rating == 4.0
         assert combo.first_applied_id == b.perfume_id
         assert restored.rating_events()[0].context == "hot afternoon"
+        assert restored.palette() == {
+            "family": {"citrus": 1.0},
+            "note": {"Cumin": -1.0},
+        }
 
 
 def test_appending_after_a_restore_does_not_reuse_ids():

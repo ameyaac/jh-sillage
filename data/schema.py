@@ -1,11 +1,17 @@
 """Record types and validation for the Sillage rating log.
 
-The log is four append-only tables, not one mutable one:
+The log is five append-only tables, not one mutable one:
 
     perfumes.csv      immutable compositions
     combinations.csv  two perfumes worn together, by reference
     ratings.csv       ratings the user actually gave, as timestamped events
     predictions.csv   what the model said, when, and with which feature spec
+    preferences.csv   taste the user *declared*, as opposed to demonstrated
+
+`preferences.csv` is a prior, not evidence. It holds signed affinities in [-1, +1]
+over families, axes, notes and mediums — deliberately not on the 1–5 rating scale,
+so it can never be mistaken for a training target. It seeds the model before any
+ratings exist and gets overridden by the likelihood as ratings arrive.
 
 Ratings and predictions are polymorphic over their subject — a layered pair is
 judged on the same 1–5 scale as a single perfume, so the evaluation and storage
@@ -32,7 +38,11 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# Versions this code can open and upgrade in place. v1 -> v2 added preferences.csv,
+# which is purely additive: a v1 log simply has no declared palette.
+UPGRADABLE_FROM = frozenset({1})
 
 # Note lists share one CSV cell, joined by this character. Notes containing it are
 # rejected at write time rather than silently mangled at read time.
@@ -99,6 +109,68 @@ PREDICTION_FIELDS = [
 # sprayed second dominates the opening, while the dry-down is close to the union
 # of both bases. "" means the user didn't record it.
 APPLIED_FIRST_VALUES = ("", "a", "b")
+
+PREFERENCE_FIELDS = [
+    "preference_id",
+    "scope",
+    "key",
+    "weight",
+    "declared_at",
+]
+
+# What a declared preference is *about*. Families and axes are where declarations
+# are most useful, because they transfer to notes the user has never met; specific
+# notes and mediums are what people find easiest to articulate.
+SCOPE_FAMILY = "family"
+SCOPE_AXIS = "axis"
+SCOPE_NOTE = "note"
+SCOPE_MEDIUM = "medium"
+PREFERENCE_SCOPES = (SCOPE_FAMILY, SCOPE_AXIS, SCOPE_NOTE, SCOPE_MEDIUM)
+
+# Signed affinity, NOT a rating. Kept off the 1–5 scale on purpose so a declared
+# preference can never be confused for an observed one.
+MIN_WEIGHT = -1.0
+MAX_WEIGHT = 1.0
+
+# What the UI's five-way control maps onto. Zero is a real value: it means "I
+# explicitly have no feeling about this", which retracts an earlier declaration.
+PREFERENCE_LEVELS = {
+    "love": 1.0,
+    "like": 0.5,
+    "neutral": 0.0,
+    "dislike": -0.5,
+    "avoid": -1.0,
+}
+
+# The 14-family taxonomy from ARCHITECTURE.md §3.
+FAMILIES = (
+    "citrus",
+    "floral",
+    "white-floral",
+    "fruity",
+    "green",
+    "aromatic",
+    "spicy",
+    "woody",
+    "resinous",
+    "amber",
+    "gourmand",
+    "musk",
+    "animalic",
+    "aquatic",
+)
+
+# The 8 perceptual axes from ARCHITECTURE.md §1.2 (block B3).
+AXES = (
+    "sweet",
+    "fresh",
+    "warm",
+    "woody",
+    "green",
+    "spicy",
+    "animalic",
+    "powdery",
+)
 
 
 class ValidationError(ValueError):
@@ -363,6 +435,82 @@ class Combination:
             applied_first=row.get("applied_first", ""),
             comment=row.get("comment", ""),
             created_at=row.get("created_at", ""),
+        )
+
+
+@dataclass
+class PreferenceDeclaration:
+    """Something the user said about their taste, before or alongside rating anything.
+
+    This is a *prior*, not an observation. It is the honest expression of the one
+    good idea in the legacy engine — that onboarding-declared taste should seed
+    predictions — except that here it sets prior means on family coefficients which
+    the likelihood can override, rather than hardcoding a permanent liked/disliked
+    set that no amount of contrary evidence could revise.
+
+    Declarations are append-only events, so changing your mind is recorded rather
+    than erased. A weight of exactly 0 is meaningful: it retracts a declaration.
+    """
+
+    scope: str
+    key: str
+    weight: float
+    preference_id: int | None = None
+    declared_at: str = ""
+
+    def validated(self) -> "PreferenceDeclaration":
+        scope = (self.scope or "").strip().lower()
+        if scope not in PREFERENCE_SCOPES:
+            raise ValidationError(
+                f"scope must be one of {PREFERENCE_SCOPES}, got {self.scope!r}"
+            )
+        key = (self.key or "").strip()
+        if not key:
+            raise ValidationError("a preference needs a key")
+        try:
+            weight = float(self.weight)
+        except (TypeError, ValueError):
+            raise ValidationError(f"weight {self.weight!r} is not a number") from None
+        if not MIN_WEIGHT <= weight <= MAX_WEIGHT:
+            raise ValidationError(
+                f"weight {weight} outside {MIN_WEIGHT}–{MAX_WEIGHT}. This is a signed "
+                "affinity, not a 1–5 rating."
+            )
+        # Families and axes come from a closed vocabulary; notes and mediums are
+        # open, because the point of declaring a note is often that it's unusual.
+        if scope == SCOPE_FAMILY and key.lower() not in FAMILIES:
+            raise ValidationError(f"unknown family {key!r}")
+        if scope == SCOPE_AXIS and key.lower() not in AXES:
+            raise ValidationError(f"unknown axis {key!r}")
+        return PreferenceDeclaration(
+            scope=scope,
+            key=key.lower() if scope in (SCOPE_FAMILY, SCOPE_AXIS) else key,
+            weight=round(weight, 3),
+            preference_id=self.preference_id,
+            declared_at=self.declared_at,
+        )
+
+    @property
+    def is_retraction(self) -> bool:
+        return self.weight == 0.0
+
+    def to_row(self) -> dict[str, str]:
+        return {
+            "preference_id": str(self.preference_id),
+            "scope": self.scope,
+            "key": self.key,
+            "weight": f"{self.weight:g}",
+            "declared_at": self.declared_at,
+        }
+
+    @classmethod
+    def from_row(cls, row: dict[str, str]) -> "PreferenceDeclaration":
+        return cls(
+            preference_id=int(row["preference_id"]),
+            scope=row.get("scope", ""),
+            key=row.get("key", ""),
+            weight=float(row["weight"]),
+            declared_at=row.get("declared_at", ""),
         )
 
 

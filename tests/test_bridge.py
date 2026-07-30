@@ -28,6 +28,7 @@ from data.schema import (  # noqa: E402
     COMBINATION_FIELDS,
     PERFUME_FIELDS,
     PREDICTION_FIELDS,
+    PREFERENCE_FIELDS,
     RATING_FIELDS,
 )
 
@@ -65,6 +66,7 @@ def test_js_field_lists_match_python_exactly():
         "COMBINATION_FIELDS": COMBINATION_FIELDS,
         "RATING_FIELDS": RATING_FIELDS,
         "PREDICTION_FIELDS": PREDICTION_FIELDS,
+        "PREFERENCE_FIELDS": PREFERENCE_FIELDS,
     }
     for name, fields in expected.items():
         start = source.index("var " + name)
@@ -106,6 +108,8 @@ def test_browser_export_imports_into_python():
         assert summary["combinations"] == js_summary["combinations"]
         assert summary["rated_combinations"] == js_summary["rated_combinations"]
         assert summary["predictions_logged"] == js_summary["predictions_logged"]
+        assert summary["declared_preferences"] == js_summary["declared_preferences"]
+        assert summary["preference_events"] == js_summary["preference_events"]
         assert summary["mean_rating"] == js_summary["mean_rating"]
         assert summary["distinct_notes"] == js_summary["distinct_notes"]
 
@@ -136,6 +140,14 @@ def test_browser_export_survives_awkward_text_and_notes():
         # The browser's prediction is a prediction, not a training target.
         assert [p.model_version for p in log.predictions()] == ["legacy-heuristic-js"]
         assert all(rating != 4.2 for _, rating in log.training_set())
+
+        # The declared palette crosses the boundary intact, and stays a prior: the
+        # signed weights must not have been read as ratings anywhere.
+        palette = log.palette()
+        assert palette["family"] == {"citrus": 1.0, "animalic": -1.0}
+        assert palette["note"] == {"Ambroxan": 0.5}
+        assert palette["medium"] == {"Spray Perfume (EDP)": 1.0}
+        assert all(1.0 <= rating <= 5.0 for _, rating in log.training_set())
 
 
 def test_python_export_imports_back_into_the_browser():

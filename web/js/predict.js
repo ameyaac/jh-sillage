@@ -16,6 +16,13 @@
  *      a fixed value regardless of content. Unknown notes are now counted and
  *      reported instead of quietly nudging the score.
  *
+ * It also now takes the user's optionally-declared palette. Precedence is
+ * evidence > declaration > built-in seed: something you actually rated overrides
+ * something you said, which overrides the shipped default list. Family and axis
+ * declarations mostly cannot be used until the lexicon exists, since without
+ * note -> family resolution there is nothing to apply them to; they are stored and
+ * the UI says so rather than pretending otherwise.
+ *
  * Exposed as window.Sillage.Predict.
  */
 (function (root) {
@@ -40,6 +47,15 @@
     neutral: ['lily', 'magnolia', 'tuberose', 'gardenia', 'ylang ylang', 'incense',
       'smoke', 'leather', 'tobacco', 'oakmoss', 'labdanum', 'mint', 'eucalyptus',
       'clary sage', 'pine']
+  };
+
+  /* The form's scent-family buttons are not the 14-family taxonomy. These are the
+   * ones that map cleanly; the rest (Chypre, Fresh) have no single family and are
+   * left alone rather than guessed at. Oriental -> amber follows the usual modern
+   * reclassification. */
+  var TYPE_TO_FAMILY = {
+    Floral: 'floral', Woody: 'woody', Citrus: 'citrus', Aquatic: 'aquatic',
+    Gourmand: 'gourmand', Spicy: 'spicy', Oriental: 'amber', 'Fougère': 'aromatic'
   };
 
   var SCENT_TYPE_WEIGHTS = {
@@ -80,27 +96,46 @@
     return { liked: liked, disliked: disliked, count: (trainingSet || []).length };
   }
 
-  function scoreNote(note, learned) {
+  /* Declared note preferences, keyed like the seed sets. */
+  function declaredNotes(palette) {
+    var liked = Object.create(null), disliked = Object.create(null);
+    var declared = (palette && palette.note) || {};
+    Object.keys(declared).forEach(function (key) {
+      var weight = declared[key];
+      if (weight > 0) liked[key.toLowerCase()] = true;
+      else if (weight < 0) disliked[key.toLowerCase()] = true;
+    });
+    return { liked: liked, disliked: disliked, count: Object.keys(declared).length };
+  }
+
+  /* Precedence: what you rated beats what you said beats the shipped default. */
+  function scoreNote(note, learned, declared) {
     var key = String(note).toLowerCase();
-    if (learned.disliked[key] || SEED_DISLIKED[key]) return { score: -1, known: true };
-    if (learned.liked[key] || SEED_LIKED[key]) return { score: 1, known: true };
+    if (learned.disliked[key]) return { score: -1, known: true };
+    if (learned.liked[key]) return { score: 1, known: true };
+    if (declared.disliked[key]) return { score: -1, known: true };
+    if (declared.liked[key]) return { score: 1, known: true };
+    if (SEED_DISLIKED[key]) return { score: -1, known: true };
+    if (SEED_LIKED[key]) return { score: 1, known: true };
     if (SEED_NEUTRAL[key]) return { score: 0.3, known: true };
     return { score: 0, known: false }; /* was 0.1 — an unknown note now abstains */
   }
 
-  /* trainingSet: [{perfume, rating}] from actual ratings only. */
-  function run(topNotes, midNotes, baseNotes, scentType, trainingSet) {
+  /* trainingSet: [{perfume, rating}] from actual ratings only.
+   * palette: {scope: {key: weight}} from Store.palette(), or null. */
+  function run(topNotes, midNotes, baseNotes, scentType, trainingSet, palette, medium) {
     var total = topNotes.length + midNotes.length + baseNotes.length;
     if (!total) return null;
 
     var learned = learnedPreferences(trainingSet);
+    var declared = declaredNotes(palette);
     var unknown = [];
 
     function layerScore(notes, weight) {
       if (!notes.length) return null;
       var sum = 0;
       notes.forEach(function (note) {
-        var scored = scoreNote(note, learned);
+        var scored = scoreNote(note, learned, declared);
         if (!scored.known) unknown.push(note);
         sum += scored.score;
       });
@@ -117,7 +152,24 @@
     var typeBonus = (scentType && SCENT_TYPE_WEIGHTS[scentType] !== undefined)
       ? SCENT_TYPE_WEIGHTS[scentType] : 0.3;
 
-    var raw = combined + typeBonus * 0.4;
+    /* A declared family preference, applied only when the selected scent family
+     * maps onto the taxonomy. Deliberately a small nudge: it is one stated opinion,
+     * not an observation. */
+    var familyAdjust = 0, familyUsed = null;
+    var mapped = TYPE_TO_FAMILY[scentType];
+    if (mapped && palette && palette.family && palette.family[mapped] !== undefined) {
+      familyAdjust = palette.family[mapped] * 0.25;
+      familyUsed = mapped;
+    }
+
+    /* A declared medium preference, matched exactly against the form's options. */
+    var mediumAdjust = 0, mediumUsed = null;
+    if (medium && palette && palette.medium && palette.medium[medium] !== undefined) {
+      mediumAdjust = palette.medium[medium] * 0.15;
+      mediumUsed = medium;
+    }
+
+    var raw = combined + typeBonus * 0.4 + familyAdjust + mediumAdjust;
     var normalized = (raw + 1) / 2.8;
     var score = Math.max(1, Math.min(5, 1 + normalized * 4));
 
@@ -134,7 +186,10 @@
       /* Everything the UI needs to be honest about how little it knows. */
       unknownNotes: unknown,
       knownFraction: total ? (total - unknown.length) / total : 0,
-      ratingsUsed: learned.count
+      ratingsUsed: learned.count,
+      declarationsUsed: declared.count + (familyUsed ? 1 : 0) + (mediumUsed ? 1 : 0),
+      declaredFamily: familyUsed,
+      declaredMedium: mediumUsed
     };
   }
 
@@ -164,8 +219,10 @@
 
   Sillage.Predict = {
     MODEL_VERSION: MODEL_VERSION,
+    TYPE_TO_FAMILY: TYPE_TO_FAMILY,
     run: run,
     verdict: verdict,
-    learnedPreferences: learnedPreferences
+    learnedPreferences: learnedPreferences,
+    declaredNotes: declaredNotes
   };
 })(window);

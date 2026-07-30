@@ -26,6 +26,10 @@
       <span>Perfume Preference Predictor</span>
     </div>
   </div>
+  <nav class="topbar-nav" role="tablist" aria-label="Sections">
+    <button type="button" class="nav-tab" data-view-target="log" role="tab" aria-selected="true">Log</button>
+    <button type="button" class="nav-tab" data-view-target="preferences" role="tab" aria-selected="false">Preferences</button>
+  </nav>
   <div class="topbar-actions">
     <button class="btn-icon" id="downloadBtn" title="Download backup CSVs" aria-label="Download backup CSVs">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -38,7 +42,8 @@
 
 <!-- Main -->
 <main>
-  <div class="main-content">
+  <!-- LOG VIEW -->
+  <div class="main-content" id="viewLog" data-view="log">
 
     <!-- LEFT: Form -->
     <div>
@@ -218,6 +223,111 @@
     </div>
 
   </div>
+
+  <!-- PREFERENCES VIEW -->
+  <div class="main-content single-column" id="viewPreferences" data-view="preferences" hidden>
+    <div class="card">
+      <h2 class="card-title">Your base smell palette</h2>
+      <p class="card-subtitle">
+        Optional. Tell the model what you already know you like, so it has somewhere to
+        start before you have rated anything. You can skip this entirely and just start
+        rating — an empty palette is a complete answer.
+      </p>
+
+      <div class="callout">
+        <p><strong>This is a starting point, not a rule.</strong> Anything you declare here
+        is a <em>prior</em>: as soon as you rate real perfumes, the ratings override it.
+        Precedence is <em>what you rated &gt; what you declared &gt; the shipped default
+        list</em>.</p>
+        <p>Nothing here is used as training data. Declarations are saved as their own
+        events, so changing your mind is recorded rather than erased, and setting something
+        back to <strong>–</strong> retracts it.</p>
+      </div>
+
+      <p class="palette-summary" id="paletteSummary"></p>
+
+      <hr class="divider">
+
+      <section class="palette-section">
+        <p class="section-heading">Note families</p>
+        <p class="input-description" style="margin-bottom: var(--space-4)">
+          The most useful thing to fill in: families transfer to notes you have never
+          met, which is what lets the model score an unfamiliar fragrance at all.
+        </p>
+        <div class="palette-grid" id="paletteFamilies"></div>
+      </section>
+
+      <hr class="divider">
+
+      <section class="palette-section">
+        <p class="section-heading">Specific notes</p>
+        <p class="input-description" style="margin-bottom: var(--space-4)">
+          Individual notes you know you seek out or can't stand. Press Enter or comma to
+          add. A note can't be in both lists — the newer entry wins.
+        </p>
+        <div class="form-group full" style="margin-bottom: var(--space-4)">
+          <label for="lovedNotesInput">Notes I love</label>
+          <div class="tag-input-wrap" id="lovedNotesWrap">
+            <input type="text" id="lovedNotesInput" placeholder="e.g. vetiver, ambergris, iris" autocomplete="off">
+          </div>
+        </div>
+        <div class="form-group full">
+          <label for="avoidedNotesInput">Notes I avoid</label>
+          <div class="tag-input-wrap" id="avoidedNotesWrap">
+            <input type="text" id="avoidedNotesInput" placeholder="e.g. cumin, civet" autocomplete="off">
+          </div>
+        </div>
+      </section>
+
+      <hr class="divider">
+
+      <section class="palette-section">
+        <p class="section-heading">Medium &amp; concentration</p>
+        <p class="input-description" style="margin-bottom: var(--space-4)">
+          Formats you actually reach for. Matched exactly against the medium you pick when
+          logging, so these stay comparable.
+        </p>
+        <div class="palette-grid" id="paletteMediums"></div>
+      </section>
+
+      <hr class="divider">
+
+      <details class="palette-advanced">
+        <summary>Perceptual axes <span class="hint">advanced — stored, not yet used</span></summary>
+        <p class="input-description" style="margin: var(--space-3) 0 var(--space-4)">
+          Cross-cutting qualities rather than families. These are saved and will feed the
+          real model once note-to-axis resolution exists; the current placeholder scorer
+          cannot apply them, and this page would rather say so than imply otherwise.
+        </p>
+        <div class="palette-grid" id="paletteAxes"></div>
+      </details>
+
+      <hr class="divider">
+
+      <div class="palette-actions">
+        <button type="button" class="btn-primary" id="savePaletteBtn" style="margin-top:0" disabled>
+          Save palette
+        </button>
+        <button type="button" class="btn-secondary" id="clearPaletteBtn" style="margin-top:0">
+          Clear everything
+        </button>
+      </div>
+      <p class="palette-status" id="paletteStatus"></p>
+
+      <hr class="divider">
+
+      <p class="backup-note" style="margin-bottom: var(--space-3)">
+        Your palette is saved in this browser only, like everything else here. It is
+        included in the backup as <code>preferences.csv</code> — the button below
+        downloads the <strong>whole log</strong>, not just the palette, because a
+        partial export that looked like a backup would be the more dangerous thing to
+        keep. Restore it from the <em>Backup &amp; Restore</em> card on the Log tab.
+      </p>
+      <button type="button" class="btn-secondary" id="downloadPaletteBtn" style="margin-top:0">
+        Download my log (5 CSVs, palette included)
+      </button>
+    </div>
+  </div>
 </main>
 </div>
 
@@ -228,6 +338,7 @@
 <script src="web/js/csv.js"></script>
 <script src="web/js/store.js"></script>
 <script src="web/js/predict.js"></script>
+<script src="web/js/preferences.js"></script>
 <script src="web/js/app.js"></script>
 </body>
 </html>

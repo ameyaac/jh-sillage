@@ -80,6 +80,14 @@
 
 /* ── Reset & Base ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* The `hidden` attribute is only honoured by the UA stylesheet, so ANY author rule
+   that sets `display` on the element wins and the element stays visible. That is
+   what made the Log and Preferences views render stacked on top of each other:
+   `.main-content { display: grid }` silently overrode `hidden`. Keep this rule
+   above everything that sets a display value. */
+[hidden] { display: none !important; }
+
 html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
 body { font-family: var(--font-body); font-size: var(--text-base); color: var(--color-text); background: var(--color-bg); min-height: 100dvh; line-height: 1.6; }
 img, svg { display: block; max-width: 100%; }
@@ -219,6 +227,52 @@ tr:hover td { background: var(--color-surface-offset); }
 .transfer-report details { margin-top: var(--space-2); }
 .transfer-report summary { cursor: pointer; color: var(--color-text-muted); }
 .transfer-report pre { white-space: pre-wrap; word-break: break-word; margin-top: var(--space-2); color: var(--color-error); font-size: 0.95em; }
+
+/* ── View tabs ── */
+.topbar-nav { display: flex; gap: var(--space-1); background: var(--color-surface-offset); padding: 3px; border-radius: var(--radius-full); }
+.nav-tab { padding: var(--space-1) var(--space-4); border-radius: var(--radius-full); font-size: var(--text-xs); font-weight: 600; color: var(--color-text-muted); letter-spacing: 0.03em; }
+.nav-tab:hover { color: var(--color-text); }
+.nav-tab.active { background: var(--color-surface); color: var(--color-primary); box-shadow: var(--shadow-sm); }
+@media (max-width: 620px) {
+  .topbar { flex-wrap: wrap; gap: var(--space-3); }
+  .topbar-nav { order: 3; width: 100%; justify-content: center; }
+}
+
+/* ── Preferences page ── */
+.main-content.single-column { grid-template-columns: minmax(0, 720px); justify-content: center; }
+.callout { border-left: 3px solid var(--color-primary); background: var(--color-surface-offset); padding: var(--space-4); border-radius: var(--radius-md); font-size: var(--text-xs); line-height: 1.7; color: var(--color-text-muted); display: flex; flex-direction: column; gap: var(--space-3); }
+.callout strong { color: var(--color-text); }
+.palette-summary { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-4); }
+.palette-section { display: block; }
+.palette-grid { display: flex; flex-direction: column; gap: var(--space-2); }
+.palette-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
+.palette-label { display: flex; flex-direction: column; min-width: 12ch; }
+.palette-label > span:first-child { font-size: var(--text-sm); font-weight: 500; text-transform: capitalize; }
+.palette-hint { font-size: var(--text-xs); color: var(--color-text-faint); }
+
+/* Five-way affinity control. Radios stay in the DOM for keyboard and screen-reader
+   support; the labels are what's visible. */
+.segmented { display: flex; border: 1px solid var(--color-border); border-radius: var(--radius-full); overflow: hidden; padding: 0; margin: 0; }
+.segmented input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.segmented label { padding: 3px var(--space-3); font-size: var(--text-xs); font-weight: 500; color: var(--color-text-muted); cursor: pointer; background: var(--color-bg); border-right: 1px solid var(--color-border); white-space: nowrap; user-select: none; }
+.segmented label:last-child { border-right: none; }
+.segmented label:hover { background: var(--color-surface-offset); color: var(--color-text); }
+.segmented input:focus-visible + label { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+.segmented input:checked + label.seg-love { background: var(--color-primary); color: #fff; }
+.segmented input:checked + label.seg-like { background: var(--color-success-highlight); color: var(--color-success); }
+.segmented input:checked + label.seg-neutral { background: var(--color-surface-offset); color: var(--color-text); }
+.segmented input:checked + label.seg-dislike { background: var(--color-accent-highlight); color: var(--color-accent); }
+.segmented input:checked + label.seg-avoid { background: var(--color-error-highlight); color: var(--color-error); }
+
+.tag-avoid { background: var(--color-error-highlight); color: var(--color-error); }
+.palette-advanced summary { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; }
+.palette-advanced summary:hover { color: var(--color-text); }
+.palette-advanced[open] summary { margin-bottom: var(--space-2); }
+.palette-actions { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+.palette-actions .btn-primary, .palette-actions .btn-secondary { width: auto; flex: 1 1 12rem; }
+.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+.palette-status { margin-top: var(--space-3); font-size: var(--text-xs); color: var(--color-text-muted); min-height: 1.4em; }
+.palette-status.bad { color: var(--color-error); }
 
 /* ── Toast ── */
 .toast { position: fixed; bottom: var(--space-6); right: var(--space-6); padding: var(--space-3) var(--space-5); background: var(--color-text); color: var(--color-bg); border-radius: var(--radius-md); font-size: var(--text-sm); box-shadow: var(--shadow-lg); z-index: 200; opacity: 0; transform: translateY(8px); transition: opacity 0.3s, transform 0.3s; pointer-events: none; max-width: 300px; }

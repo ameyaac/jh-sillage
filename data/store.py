@@ -1,10 +1,10 @@
 """Append-only store for the Sillage rating log.
 
-Four CSV tables plus a `_meta.json` recording the schema version. Nothing is ever
-rewritten in place: logging a perfume, pairing it with another, rating either, and
-predicting either are all appends. That makes the log safe to tail, diff, and back
-up, and it means a crash mid-write can at worst lose the last line rather than
-corrupt the file.
+Five CSV tables plus a `_meta.json` recording the schema version. Nothing is ever
+rewritten in place: logging a perfume, pairing it with another, rating either,
+predicting either, and declaring a taste preference are all appends. That makes the
+log safe to tail, diff, and back up, and it means a crash mid-write can at worst
+lose the last line rather than corrupt the file.
 
 Location, in order of precedence:
 
@@ -25,13 +25,16 @@ from .schema import (
     COMBINATION_FIELDS,
     PERFUME_FIELDS,
     PREDICTION_FIELDS,
+    PREFERENCE_FIELDS,
     RATING_FIELDS,
     SCHEMA_VERSION,
     SUBJECT_COMBINATION,
     SUBJECT_PERFUME,
+    UPGRADABLE_FROM,
     Combination,
     Perfume,
     Prediction,
+    PreferenceDeclaration,
     RatingEvent,
     ValidationError,
     now_stamp,
@@ -44,6 +47,7 @@ PERFUMES_FILE = "perfumes.csv"
 COMBINATIONS_FILE = "combinations.csv"
 RATINGS_FILE = "ratings.csv"
 PREDICTIONS_FILE = "predictions.csv"
+PREFERENCES_FILE = "preferences.csv"
 META_FILE = "_meta.json"
 
 
@@ -87,14 +91,20 @@ class RatingLog:
         return self.dir / PREDICTIONS_FILE
 
     @property
+    def preferences_path(self) -> Path:
+        return self.dir / PREFERENCES_FILE
+
+    @property
     def meta_path(self) -> Path:
         return self.dir / META_FILE
 
     def _check_meta(self) -> None:
-        """Write the version on first use; refuse to open anything newer.
+        """Write the version on first use; upgrade what we can; refuse the rest.
 
-        Reading a v2 log with v1 code would parse some columns and silently drop
-        others, which is worse than failing.
+        Reading a newer log with older code would parse some columns and silently
+        drop others, which is worse than failing. Older logs are upgraded in place
+        when the difference is purely additive — a v1 log has no preferences.csv,
+        and an absent table reads as an empty one.
         """
         if not self.meta_path.exists():
             self._write_meta({"schema_version": SCHEMA_VERSION, "created_at": now_stamp()})
@@ -103,12 +113,21 @@ class RatingLog:
             meta = json.loads(self.meta_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise SchemaVersionError(f"cannot read {self.meta_path}: {exc}") from exc
+
         found = meta.get("schema_version")
-        if found != SCHEMA_VERSION:
-            raise SchemaVersionError(
-                f"{self.dir} holds schema v{found}, this code speaks v{SCHEMA_VERSION}. "
-                "Migrate it before use."
+        if found == SCHEMA_VERSION:
+            return
+        if found in UPGRADABLE_FROM:
+            meta["schema_version"] = SCHEMA_VERSION
+            meta.setdefault("upgrades", []).append(
+                {"from": found, "to": SCHEMA_VERSION, "at": now_stamp()}
             )
+            self._write_meta(meta)
+            return
+        raise SchemaVersionError(
+            f"{self.dir} holds schema v{found}, this code speaks v{SCHEMA_VERSION} "
+            f"and can upgrade from {sorted(UPGRADABLE_FROM)}. Migrate it before use."
+        )
 
     def _write_meta(self, meta: dict) -> None:
         tmp = self.meta_path.with_suffix(".json.tmp")
@@ -240,6 +259,25 @@ class RatingLog:
         self._append_row(self.ratings_path, RATING_FIELDS, record.to_row())
         return record
 
+    def log_preference(
+        self, scope: str, key: str, weight: float, declared_at: str = ""
+    ) -> PreferenceDeclaration:
+        """Append a declared taste preference.
+
+        Declaring the same thing again appends rather than edits, so a change of
+        mind is recorded. `palette()` reads the latest declaration per key.
+        Nothing in the training path reads these — they are a prior, not evidence.
+        """
+        record = PreferenceDeclaration(
+            scope=scope, key=key, weight=weight, declared_at=declared_at
+        ).validated()
+        record.preference_id = self._next_id(
+            self._read_rows(self.preferences_path), "preference_id"
+        )
+        record.declared_at = record.declared_at or now_stamp()
+        self._append_row(self.preferences_path, PREFERENCE_FIELDS, record.to_row())
+        return record
+
     def log_prediction(self, prediction: Prediction) -> Prediction:
         """Append a prediction. Nothing in the training path ever reads these back."""
         record = prediction.validated()
@@ -348,6 +386,39 @@ class RatingLog:
             for (combo, a, b), rating in self._latest_per_subject(rows)  # type: ignore[misc]
         ]
 
+    def preference_events(self) -> list[PreferenceDeclaration]:
+        """Every declaration ever made, oldest first."""
+        events = [
+            PreferenceDeclaration.from_row(r)
+            for r in self._read_rows(self.preferences_path)
+        ]
+        events.sort(key=lambda p: (p.declared_at, p.preference_id or 0))
+        return events
+
+    def palette(self, include_retracted: bool = False) -> dict[str, dict[str, float]]:
+        """The user's declared smell palette: {scope: {key: weight}}.
+
+        Latest declaration per (scope, key) wins. Retractions (weight 0) drop out
+        unless asked for, so an empty palette and a fully-retracted one look the
+        same to the model — which is correct, since both mean "no prior".
+
+        This is optional by design. An empty palette is a valid, complete answer;
+        the model then starts from the population/neutral prior instead.
+        """
+        latest: dict[tuple[str, str], PreferenceDeclaration] = {}
+        for event in self.preference_events():  # already chronological
+            latest[(event.scope, event.key)] = event
+
+        out: dict[str, dict[str, float]] = {}
+        for (scope, key), event in latest.items():
+            if event.is_retraction and not include_retracted:
+                continue
+            out.setdefault(scope, {})[key] = event.weight
+        return out
+
+    def has_palette(self) -> bool:
+        return any(self.palette().values())
+
     def unrated(self) -> list[Perfume]:
         rated = set(self.current_ratings(SUBJECT_PERFUME))
         return [p for p in self.perfumes() if p.perfume_id not in rated]
@@ -406,6 +477,8 @@ class RatingLog:
                 {combo_groups[c.combination_id] for c, _, _, _ in pairs}
             ),
             "predictions_logged": len(self.predictions()),
+            "declared_preferences": sum(len(v) for v in self.palette().values()),
+            "preference_events": len(self.preference_events()),
             "mean_rating": round(sum(ratings) / len(ratings), 3) if ratings else None,
             "distinct_notes": len(
                 {n.casefold() for p in self.perfumes() for n in p.all_notes}

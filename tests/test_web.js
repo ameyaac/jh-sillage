@@ -270,13 +270,14 @@ tests['group key merges concentrations but not flankers'] = () => {
 
 /* ── store: export and import ─────────────────────────────────────────────── */
 
-tests['export writes all four files even when empty'] = () => {
+tests['export writes all five files even when empty'] = () => {
   const { Store } = boot();
   Store.logPerfume(withPerfume());
   const files = Store.exportFiles();
   eq(
     files.map((f) => f.name),
-    ['perfumes.csv', 'combinations.csv', 'ratings.csv', 'predictions.csv']
+    ['perfumes.csv', 'combinations.csv', 'ratings.csv', 'predictions.csv',
+      'preferences.csv']
   );
   files.forEach((f) => assert.ok(f.text.split('\r\n')[0].length, `${f.name} needs a header`));
 };
@@ -352,6 +353,120 @@ tests['a rejected import leaves the existing log untouched'] = () => {
   eq(Store.perfumes().map((p) => p.name), ['Mine']);
 };
 
+/* ── store: declared preferences ──────────────────────────────────────────── */
+
+tests['palette round trip'] = () => {
+  const { Store } = boot();
+  Store.logPreference('family', 'citrus', 1.0);
+  Store.logPreference('family', 'animalic', -1.0);
+  Store.logPreference('note', 'Vetiver', 0.5);
+  Store.logPreference('medium', 'Spray Perfume (EDP)', 1.0);
+  Store.logPreference('axis', 'powdery', -0.5);
+
+  const palette = Store.palette();
+  eq(palette.family, { citrus: 1.0, animalic: -1.0 });
+  eq(palette.note, { Vetiver: 0.5 });
+  eq(palette.medium, { 'Spray Perfume (EDP)': 1.0 });
+  eq(palette.axis, { powdery: -0.5 });
+  assert.ok(Store.hasPalette());
+};
+
+tests['declared preferences never reach the training set'] = () => {
+  const { Store } = boot();
+  const p = Store.logPerfume(withPerfume());
+  Store.logPreference('family', 'citrus', 1.0);
+  Store.logPreference('note', 'bergamot', 1.0);
+  eq(Store.trainingSet(), []);
+
+  Store.logRating({ perfumeId: p.perfume_id, rating: 4.0 });
+  eq(Store.trainingSet().map((t) => t.rating), [4.0]);
+  assert.strictEqual(Store.summary().mean_rating, 4.0, 'declarations must not move this');
+};
+
+tests['redeclaring appends and the latest wins'] = () => {
+  const { Store } = boot();
+  Store.logPreference('family', 'woody', 0.5, '2026-01-01T00:00:00');
+  Store.logPreference('family', 'woody', -1.0, '2026-06-01T00:00:00');
+  eq(Store.palette().family, { woody: -1.0 });
+  assert.strictEqual(Store.preferenceEvents().length, 2, 'history must survive');
+};
+
+tests['a retraction leaves the palette empty but stays on disk'] = () => {
+  const { Store } = boot();
+  Store.logPreference('family', 'gourmand', 1.0, '2026-01-01T00:00:00');
+  Store.logPreference('family', 'gourmand', 0.0, '2026-02-01T00:00:00');
+  eq(Store.palette(), {});
+  assert.ok(!Store.hasPalette());
+  eq(Store.palette(true).family, { gourmand: 0.0 });
+  assert.strictEqual(Store.preferenceEvents().length, 2);
+};
+
+tests['invalid preferences are refused'] = () => {
+  const { Store } = boot();
+  throws(() => Store.logPreference('vibe', 'citrus', 1.0), 'unknown scope');
+  throws(() => Store.logPreference('family', 'petrichor', 1.0), 'unknown family');
+  throws(() => Store.logPreference('axis', 'loud', 1.0), 'unknown axis');
+  throws(() => Store.logPreference('note', '   ', 1.0), 'empty key');
+  throws(() => Store.logPreference('family', 'citrus', 2.0), 'weight above range');
+  /* 4.5 is a plausible rating, which is the confusion the signed scale prevents. */
+  throws(() => Store.logPreference('family', 'citrus', 4.5), 'rating-shaped weight');
+  throws(() => Store.logPreference('family', 'citrus', 'lots'), 'non-numeric weight');
+  eq(Store.preferenceEvents(), []);
+};
+
+tests['setPalette skips no-op writes'] = () => {
+  const { Store } = boot();
+  Store.logPreference('family', 'citrus', 1.0);
+  /* Unchanged value, and a zero for something never declared: neither is a change. */
+  const written = Store.setPalette([
+    { scope: 'family', key: 'citrus', weight: 1.0 },
+    { scope: 'family', key: 'woody', weight: 0.0 },
+    { scope: 'family', key: 'amber', weight: -0.5 }
+  ]);
+  assert.strictEqual(written.length, 1);
+  eq(Store.palette().family, { citrus: 1.0, amber: -0.5 });
+  assert.strictEqual(Store.preferenceEvents().length, 2);
+};
+
+tests['a v1 log in localStorage is upgraded, not discarded'] = () => {
+  const storage = makeLocalStorage([['sillage.log.v1', JSON.stringify({
+    schema_version: 1,
+    perfumes: [{
+      perfume_id: 1, brand: 'Dior', name: 'Sauvage', perfume_type: 'Woody',
+      perfume_medium: '', perfume_strength: '', top_notes: ['bergamot'],
+      middle_notes: [], base_notes: [], comment: '', logged_at: '2026-01-01T00:00:00'
+    }],
+    combinations: [],
+    ratings: [{
+      rating_id: 1, subject_type: 'perfume', subject_id: 1, rating: 4.5,
+      context: '', rated_at: '2026-01-02T00:00:00'
+    }],
+    predictions: []
+  })]]);
+  const { Store } = boot(storage, { quiet: true });
+  eq(Store.perfumes().map((p) => p.name), ['Sauvage']);
+  eq(Store.trainingSet().map((t) => t.rating), [4.5]);
+  eq(Store.palette(), {});
+  /* Persisted under the new key, with the old one left as an accidental backup. */
+  assert.ok(storage.getItem('sillage.log.v2'), 'should be saved under the v2 key');
+  assert.strictEqual(JSON.parse(storage.getItem('sillage.log.v2')).schema_version, 2);
+};
+
+tests['preferences survive the export/import round trip'] = () => {
+  const { Store } = boot();
+  Store.logPreference('family', 'citrus', 1.0);
+  Store.logPreference('note', 'Cumin', -1.0);
+  const files = Store.exportFiles();
+  assert.ok(files.some((f) => f.name === 'preferences.csv'));
+
+  const fresh = boot().Store;
+  const report = fresh.prepareImport(files);
+  assert.strictEqual(report.rejected, 0, JSON.stringify(report.tables));
+  fresh.applyImport(report);
+  eq(fresh.palette().family, { citrus: 1.0 });
+  eq(fresh.palette().note, { Cumin: -1.0 });
+};
+
 /* ── predictor ────────────────────────────────────────────────────────────── */
 
 tests['predictor learns from actual ratings only'] = () => {
@@ -380,6 +495,57 @@ tests['a dislike beats a like for the same note'] = () => {
   assert.ok(!learned.liked.cumin, 'a note in a hated perfume is not evidence of liking it');
 };
 
+tests['a declared note preference beats the shipped seed list'] = () => {
+  const { Predict } = boot();
+  /* "rose" is in the built-in disliked seed. Declaring you love it must win. */
+  const seeded = Predict.run(['rose'], [], [], '', [], null, '');
+  const declared = Predict.run(['rose'], [], [], '', [], { note: { rose: 1.0 } }, '');
+  assert.ok(declared.total > seeded.total, 'a declaration should override the seed');
+  assert.strictEqual(declared.declarationsUsed, 1);
+};
+
+tests['a real rating beats a declared preference'] = () => {
+  const { Predict } = boot();
+  const palette = { note: { zzzfictional: 1.0 } };
+  const withDeclaration = Predict.run(['zzzfictional'], [], [], '', [], palette, '');
+  const contradicted = Predict.run(['zzzfictional'], [], [], '', [
+    { perfume: { top_notes: ['zzzfictional'], middle_notes: [], base_notes: [] }, rating: 1 }
+  ], palette, '');
+  assert.ok(contradicted.total < withDeclaration.total,
+    'evidence must override declaration');
+};
+
+tests['a declared family preference applies only via a mapped scent family'] = () => {
+  const { Predict } = boot();
+  const palette = { family: { woody: -1.0 } };
+  const base = Predict.run(['bergamot'], [], [], 'Woody', [], null, '');
+  const disliked = Predict.run(['bergamot'], [], [], 'Woody', [], palette, '');
+  assert.ok(disliked.total < base.total);
+  assert.strictEqual(disliked.declaredFamily, 'woody');
+
+  /* Chypre has no single family in the taxonomy, so nothing is applied. */
+  const unmapped = Predict.run(['bergamot'], [], [], 'Chypre', [], palette, '');
+  assert.strictEqual(unmapped.declaredFamily, null);
+};
+
+tests['a declared medium preference applies on exact match'] = () => {
+  const { Predict } = boot();
+  const palette = { medium: { 'Attar / Oil': 1.0 } };
+  const matched = Predict.run(['bergamot'], [], [], '', [], palette, 'Attar / Oil');
+  const other = Predict.run(['bergamot'], [], [], '', [], palette, 'Body Mist');
+  assert.strictEqual(matched.declaredMedium, 'Attar / Oil');
+  assert.strictEqual(other.declaredMedium, null);
+  assert.ok(matched.total > other.total);
+};
+
+tests['no palette is a valid complete answer'] = () => {
+  const { Predict } = boot();
+  const none = Predict.run(['bergamot'], [], [], 'Citrus', [], null, '');
+  const empty = Predict.run(['bergamot'], [], [], 'Citrus', [], {}, '');
+  assert.strictEqual(none.total, empty.total);
+  assert.strictEqual(empty.declarationsUsed, 0);
+};
+
 tests['unknown notes are reported instead of nudging the score'] = () => {
   const { Predict } = boot();
   const result = Predict.run(['zzzunknownnote'], [], [], '', []);
@@ -404,6 +570,102 @@ tests['scores stay inside 1..5 and the verdict is stable'] = () => {
   assert.strictEqual(Predict.verdict(loved.total), Predict.verdict(loved.total));
 };
 
+tests['a palette-only log is still worth backing up'] = () => {
+  /* The download guard used to check "has the user logged a perfume", which made a
+   * declared palette with no perfumes yet — the normal onboarding state —
+   * unbackupable. */
+  const { Store } = boot();
+  assert.ok(Store.isEmpty(), 'a fresh log should be empty');
+
+  Store.logPreference('family', 'citrus', 1.0);
+  assert.ok(!Store.isEmpty(), 'a declared palette is something to back up');
+
+  const files = Store.exportFiles();
+  const preferences = files.filter((f) => f.name === 'preferences.csv')[0];
+  assert.ok(/citrus/.test(preferences.text), 'the declaration must be in the CSV');
+
+  /* And all five files are still written, so the backup stays complete. */
+  assert.strictEqual(files.length, 5);
+  files.forEach((f) => assert.ok(f.text.split('\r\n')[0].length, f.name + ' needs a header'));
+};
+
+tests['a palette-only backup restores on its own'] = () => {
+  const { Store } = boot();
+  Store.logPreference('family', 'amber', 1.0);
+  Store.logPreference('note', 'Cumin', -1.0);
+
+  const fresh = boot().Store;
+  const report = fresh.prepareImport(Store.exportFiles());
+  assert.strictEqual(report.rejected, 0, JSON.stringify(report.tables));
+  fresh.applyImport(report);
+  eq(fresh.palette().family, { amber: 1.0 });
+  eq(fresh.palette().note, { Cumin: -1.0 });
+  eq(fresh.perfumes(), []);
+};
+
+/* ── static markup / stylesheet checks ────────────────────────────────────── */
+
+/* These are lints, not render tests — there is no DOM here. They exist because the
+ * bugs they catch are invisible in unit tests and obvious in a browser. */
+
+const INDEX_HTML = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const STYLES_CSS = fs.readFileSync(path.join(__dirname, '..', 'web', 'styles.css'), 'utf8');
+/* Comments mention selectors, so order checks must run on the declarations only. */
+const STYLES_CODE = STYLES_CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+
+tests['[hidden] is forced off, so view switching actually hides views'] = () => {
+  /* The `hidden` attribute is only honoured by the UA stylesheet, so any author rule
+   * setting `display` on the element beats it. `.main-content { display: grid }` did
+   * exactly that, and both views rendered stacked. */
+  const hiddenElements = INDEX_HTML.match(/<[^>]*\shidden(?=[\s>])[^>]*>/g) || [];
+  assert.ok(hiddenElements.length, 'expected at least one element using [hidden]');
+
+  const rule = /\[hidden\]\s*\{[^}]*display\s*:\s*none\s*!important/.test(STYLES_CODE);
+  assert.ok(rule, '[hidden] { display: none !important } is missing from styles.css');
+
+  /* And it must come before anything that sets a display value, or a later rule of
+   * equal specificity would win again. */
+  const hiddenAt = STYLES_CODE.search(/\[hidden\]\s*\{/);
+  const mainContentAt = STYLES_CODE.search(/\.main-content\s*\{/);
+  assert.ok(hiddenAt < mainContentAt,
+    'the [hidden] rule must precede .main-content, which sets display: grid');
+};
+
+tests['every view has a tab and every tab has a view'] = () => {
+  const views = (INDEX_HTML.match(/data-view="([^"]+)"/g) || [])
+    .map((m) => m.replace(/.*"([^"]+)"/, '$1'));
+  const targets = (INDEX_HTML.match(/data-view-target="([^"]+)"/g) || [])
+    .map((m) => m.replace(/.*"([^"]+)"/, '$1'));
+  assert.ok(views.length >= 2, 'expected at least two views');
+  eq(views.slice().sort(), targets.slice().sort());
+};
+
+tests['exactly one view starts visible'] = () => {
+  /* Two visible on load is the stacked-views bug; zero is a blank page. */
+  const sections = INDEX_HTML.match(/<div[^>]*data-view="[^"]*"[^>]*>/g) || [];
+  const visible = sections.filter((tag) => !/\shidden(?=[\s>])/.test(tag));
+  assert.strictEqual(visible.length, 1,
+    'exactly one [data-view] section should lack the hidden attribute, found ' +
+    visible.length);
+};
+
+tests['every download trigger in the markup is wired up'] = () => {
+  const APP_JS = fs.readFileSync(path.join(__dirname, '..', 'web', 'js', 'app.js'), 'utf8');
+  ['downloadBtn', 'downloadAllBtn', 'downloadPaletteBtn'].forEach((id) => {
+    assert.ok(INDEX_HTML.indexOf('id="' + id + '"') !== -1, id + ' missing from markup');
+    assert.ok(APP_JS.indexOf("$('" + id + "')") !== -1, id + ' not wired in app.js');
+  });
+};
+
+tests['scripts load in dependency order and are classic, not modules'] = () => {
+  const srcs = (INDEX_HTML.match(/<script src="([^"]+)"/g) || [])
+    .map((m) => m.replace(/.*"([^"]+)"/, '$1'));
+  eq(srcs, ['web/js/csv.js', 'web/js/store.js', 'web/js/predict.js',
+    'web/js/preferences.js', 'web/js/app.js']);
+  assert.ok(!/<script[^>]*type="module"/.test(INDEX_HTML),
+    'ES modules are blocked by file:// CORS; keep these classic scripts');
+};
+
 /* ── runner ───────────────────────────────────────────────────────────────── */
 
 /* Emit a populated export for tests/test_bridge.py to feed to the Python importer. */
@@ -422,6 +684,10 @@ function emit(dir) {
   Store.logRating({ perfumeId: b.perfume_id, rating: 3.0 });
   Store.logRating({ combinationId: combo.combination_id, rating: 4.0 });
   Store.logPrediction({ subjectId: a.perfume_id, value: 4.2, modelVersion: 'legacy-heuristic-js' });
+  Store.logPreference('family', 'citrus', 1.0);
+  Store.logPreference('family', 'animalic', -1.0);
+  Store.logPreference('note', 'Ambroxan', 0.5);
+  Store.logPreference('medium', 'Spray Perfume (EDP)', 1.0);
 
   fs.mkdirSync(dir, { recursive: true });
   Store.exportFiles().forEach((file) => {

@@ -1,4 +1,4 @@
-/* Browser-side rating log — the same four tables as data/store.py, in localStorage.
+/* Browser-side rating log — the same five tables as data/store.py, in localStorage.
  *
  * Field names are deliberately snake_case to match the Python schema character for
  * character. The CSVs this produces are the ones `python -m data.portable import`
@@ -10,6 +10,9 @@
  *     page learned from `entry.predicted`, which is a closed loop with no
  *     corrective signal.
  *   - Ratings are append-only events, so re-rating a perfume keeps both judgments.
+ *   - Declared preferences are a prior, not evidence. They live in their own table
+ *     on a signed [-1, 1] affinity scale, deliberately off the 1-5 rating scale so
+ *     they can never be mistaken for a training target.
  *
  * The previous version of this page kept the log in a plain in-memory array, so a
  * refresh lost everything. Every write here persists immediately.
@@ -22,15 +25,39 @@
   var Sillage = root.Sillage = root.Sillage || {};
   var Csv = Sillage.Csv;
 
-  var SCHEMA_VERSION = 1;
-  var STORAGE_KEY = 'sillage.log.v1';
+  var SCHEMA_VERSION = 2;
+  var STORAGE_KEY = 'sillage.log.v2';
+  /* Older keys, newest first. Read once on first load and upgraded in place —
+   * v1 -> v2 added preferences, which is purely additive. */
+  var LEGACY_STORAGE_KEYS = ['sillage.log.v1'];
+  /* Schema versions this build can read and upgrade in place. */
+  var UPGRADABLE_FROM = [1];
   var NOTE_SEPARATOR = ';';
   var MIN_RATING = 1.0, MAX_RATING = 5.0, RATING_STEP = 0.5;
+
+  var MIN_WEIGHT = -1.0, MAX_WEIGHT = 1.0;
 
   var SUBJECT_PERFUME = 'perfume';
   var SUBJECT_COMBINATION = 'combination';
   var SUBJECT_TYPES = [SUBJECT_PERFUME, SUBJECT_COMBINATION];
   var APPLIED_FIRST_VALUES = ['', 'a', 'b'];
+
+  var SCOPE_FAMILY = 'family';
+  var SCOPE_AXIS = 'axis';
+  var SCOPE_NOTE = 'note';
+  var SCOPE_MEDIUM = 'medium';
+  var PREFERENCE_SCOPES = [SCOPE_FAMILY, SCOPE_AXIS, SCOPE_NOTE, SCOPE_MEDIUM];
+
+  /* What the five-way control maps onto. Zero is a real value: it retracts an
+   * earlier declaration rather than being missing. */
+  var PREFERENCE_LEVELS = {
+    love: 1.0, like: 0.5, neutral: 0.0, dislike: -0.5, avoid: -1.0
+  };
+
+  var FAMILIES = ['citrus', 'floral', 'white-floral', 'fruity', 'green', 'aromatic',
+    'spicy', 'woody', 'resinous', 'amber', 'gourmand', 'musk', 'animalic', 'aquatic'];
+
+  var AXES = ['sweet', 'fresh', 'warm', 'woody', 'green', 'spicy', 'animalic', 'powdery'];
 
   var PERFUME_FIELDS = ['perfume_id', 'brand', 'name', 'perfume_type', 'perfume_medium',
     'perfume_strength', 'top_notes', 'middle_notes', 'base_notes', 'comment', 'logged_at'];
@@ -39,15 +66,17 @@
   var RATING_FIELDS = ['rating_id', 'subject_type', 'subject_id', 'rating', 'context', 'rated_at'];
   var PREDICTION_FIELDS = ['prediction_id', 'subject_type', 'subject_id', 'value',
     'interval_low', 'interval_high', 'model_version', 'spec_hash', 'predicted_at'];
+  var PREFERENCE_FIELDS = ['preference_id', 'scope', 'key', 'weight', 'declared_at'];
 
   var TABLES = {
     perfumes:     { file: 'perfumes.csv',     fields: PERFUME_FIELDS,     id: 'perfume_id' },
     combinations: { file: 'combinations.csv', fields: COMBINATION_FIELDS, id: 'combination_id' },
     ratings:      { file: 'ratings.csv',      fields: RATING_FIELDS,      id: 'rating_id' },
-    predictions:  { file: 'predictions.csv',  fields: PREDICTION_FIELDS,  id: 'prediction_id' }
+    predictions:  { file: 'predictions.csv',  fields: PREDICTION_FIELDS,  id: 'prediction_id' },
+    preferences:  { file: 'preferences.csv',  fields: PREFERENCE_FIELDS,  id: 'preference_id' }
   };
   /* Dependency order: a row may only reference something already imported. */
-  var IMPORT_ORDER = ['perfumes', 'combinations', 'ratings', 'predictions'];
+  var IMPORT_ORDER = ['perfumes', 'combinations', 'ratings', 'predictions', 'preferences'];
 
   function ValidationError(message) {
     this.name = 'ValidationError';
@@ -227,11 +256,45 @@
     };
   }
 
+  function validatePreference(record) {
+    var scope = str(record.scope).toLowerCase();
+    if (PREFERENCE_SCOPES.indexOf(scope) === -1) {
+      fail('scope must be one of ' + PREFERENCE_SCOPES.join(', ') + ', got "' + record.scope + '"');
+    }
+    var key = str(record.key);
+    if (!key) fail('a preference needs a key');
+    var weight = Number(record.weight);
+    if (record.weight === '' || record.weight === null || record.weight === undefined ||
+        !isFinite(weight)) {
+      fail('weight "' + record.weight + '" is not a number');
+    }
+    if (weight < MIN_WEIGHT || weight > MAX_WEIGHT) {
+      fail('weight ' + weight + ' outside ' + MIN_WEIGHT + '–' + MAX_WEIGHT +
+        '. This is a signed affinity, not a 1–5 rating.');
+    }
+    /* Families and axes come from a closed vocabulary; notes and mediums are open,
+     * because the point of declaring a note is often that it is unusual. */
+    if (scope === SCOPE_FAMILY && FAMILIES.indexOf(key.toLowerCase()) === -1) {
+      fail('unknown family "' + key + '"');
+    }
+    if (scope === SCOPE_AXIS && AXES.indexOf(key.toLowerCase()) === -1) {
+      fail('unknown axis "' + key + '"');
+    }
+    return {
+      preference_id: record.preference_id,
+      scope: scope,
+      key: (scope === SCOPE_FAMILY || scope === SCOPE_AXIS) ? key.toLowerCase() : key,
+      weight: Math.round(weight * 1000) / 1000,
+      declared_at: str(record.declared_at)
+    };
+  }
+
   var VALIDATORS = {
     perfumes: validatePerfume,
     combinations: validateCombination,
     ratings: validateRatingEvent,
-    predictions: validatePrediction
+    predictions: validatePrediction,
+    preferences: validatePreference
   };
 
   /* ── row conversion (must match the Python to_row / from_row exactly) ─────── */
@@ -275,6 +338,12 @@
         model_version: p.model_version, spec_hash: p.spec_hash,
         predicted_at: p.predicted_at
       };
+    },
+    preferences: function (p) {
+      return {
+        preference_id: String(p.preference_id), scope: p.scope, key: p.key,
+        weight: num(p.weight), declared_at: p.declared_at
+      };
     }
   };
 
@@ -315,6 +384,13 @@
         model_version: row.model_version || '', spec_hash: row.spec_hash || '',
         predicted_at: row.predicted_at || ''
       };
+    },
+    preferences: function (row) {
+      return {
+        preference_id: asInt(row.preference_id, 'preference_id'),
+        scope: row.scope || '', key: row.key || '', weight: row.weight,
+        declared_at: row.declared_at || ''
+      };
     }
   };
 
@@ -323,7 +399,7 @@
   function emptyState() {
     return {
       schema_version: SCHEMA_VERSION,
-      perfumes: [], combinations: [], ratings: [], predictions: []
+      perfumes: [], combinations: [], ratings: [], predictions: [], preferences: []
     };
   }
 
@@ -332,9 +408,17 @@
   function load() {
     if (state) return state;
     state = emptyState();
-    var raw;
+
+    var raw = null, upgradedFrom = null;
     try {
       raw = root.localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        /* Nothing at the current key — look for an older one and upgrade it. */
+        for (var i = 0; i < LEGACY_STORAGE_KEYS.length; i++) {
+          var legacy = root.localStorage.getItem(LEGACY_STORAGE_KEYS[i]);
+          if (legacy) { raw = legacy; upgradedFrom = LEGACY_STORAGE_KEYS[i]; break; }
+        }
+      }
     } catch (err) {
       /* Private browsing can deny storage entirely. The app still works for the
        * session; the backup buttons are the way out. */
@@ -342,15 +426,25 @@
       return state;
     }
     if (!raw) return state;
+
     try {
       var parsed = JSON.parse(raw);
-      if (parsed && parsed.schema_version === SCHEMA_VERSION) {
+      var version = parsed && parsed.schema_version;
+      if (version === SCHEMA_VERSION || UPGRADABLE_FROM.indexOf(version) !== -1) {
         IMPORT_ORDER.forEach(function (table) {
           if (Array.isArray(parsed[table])) state[table] = parsed[table];
         });
+        if (version !== SCHEMA_VERSION) {
+          /* Additive upgrade: tables absent in the old version stay empty. Persist
+           * under the new key so this happens once, and leave the old key alone as
+           * an accidental backup. */
+          console.warn('Sillage: upgrading log from schema v' + version +
+            ' to v' + SCHEMA_VERSION + (upgradedFrom ? ' (' + upgradedFrom + ')' : ''));
+          save();
+        }
       } else {
-        console.warn('Sillage: ignoring log written by schema v' +
-          (parsed && parsed.schema_version) + ', this build speaks v' + SCHEMA_VERSION);
+        console.warn('Sillage: ignoring log written by schema v' + version +
+          ', this build speaks v' + SCHEMA_VERSION);
       }
     } catch (err) {
       console.error('Sillage: stored log is not readable JSON, starting empty', err);
@@ -458,6 +552,41 @@
     return record;
   }
 
+  /* Declare a taste preference. Optional by design — an empty palette is a valid,
+   * complete answer, and the model then starts from the neutral prior instead.
+   * Declaring the same key again appends rather than edits, so a change of mind is
+   * recorded; a weight of exactly 0 retracts. */
+  function logPreference(scope, key, weight, declaredAt) {
+    var record = validatePreference({
+      scope: scope, key: key, weight: weight, declared_at: declaredAt || ''
+    });
+    record.preference_id = nextId('preferences');
+    record.declared_at = record.declared_at || nowStamp();
+    load().preferences.push(record);
+    save();
+    return record;
+  }
+
+  /* Write several declarations at once, skipping ones that would not change the
+   * current palette. Returns the records actually written. */
+  function setPalette(entries) {
+    var current = palette(true), written = [];
+    (entries || []).forEach(function (entry) {
+      var scope = str(entry.scope).toLowerCase();
+      var key = str(entry.key);
+      var lookupKey = (scope === SCOPE_FAMILY || scope === SCOPE_AXIS)
+        ? key.toLowerCase() : key;
+      var existing = (current[scope] || {})[lookupKey];
+      var weight = Number(entry.weight);
+      /* An unset key and an explicit 0 are the same thing to the model, so don't
+       * write a retraction for something never declared. */
+      if (existing === undefined && weight === 0) return;
+      if (existing !== undefined && Math.abs(existing - weight) < 1e-9) return;
+      written.push(logPreference(scope, key, weight));
+    });
+    return written;
+  }
+
   /* ── reads ───────────────────────────────────────────────────────────────── */
 
   function perfumes() { return load().perfumes.slice(); }
@@ -538,6 +667,41 @@
     return out.reverse();
   }
 
+  function preferenceEvents() {
+    var events = load().preferences.slice();
+    events.sort(function (a, b) {
+      if (a.declared_at !== b.declared_at) return a.declared_at < b.declared_at ? -1 : 1;
+      return (a.preference_id || 0) - (b.preference_id || 0);
+    });
+    return events;
+  }
+
+  /* The declared smell palette: {scope: {key: weight}}. Latest declaration per
+   * (scope, key) wins. Retractions drop out unless asked for, so an empty palette
+   * and a fully-retracted one look identical to the model — correct, since both
+   * mean "no prior". */
+  function palette(includeRetracted) {
+    var latest = Object.create(null);
+    preferenceEvents().forEach(function (event) {
+      latest[event.scope + '\u0000' + event.key] = event;
+    });
+    var out = {};
+    Object.keys(latest).forEach(function (composite) {
+      var event = latest[composite];
+      if (event.weight === 0 && !includeRetracted) return;
+      if (!out[event.scope]) out[event.scope] = {};
+      out[event.scope][event.key] = event.weight;
+    });
+    return out;
+  }
+
+  function hasPalette() {
+    var current = palette();
+    return Object.keys(current).some(function (scope) {
+      return Object.keys(current[scope]).length > 0;
+    });
+  }
+
   function unrated() {
     var rated = currentRatings(SUBJECT_PERFUME);
     return perfumes().filter(function (p) { return !rated[p.perfume_id]; });
@@ -551,6 +715,15 @@
       if (!seen || (p.predicted_at || '') >= (seen.predicted_at || '')) latest[p.subject_id] = p;
     });
     return latest;
+  }
+
+  /* True when no table holds anything. Used to decide whether a backup is worth
+   * offering — deliberately not "has the user logged a perfume", because a declared
+   * palette with no perfumes yet is the normal onboarding state and is absolutely
+   * worth backing up. */
+  function isEmpty() {
+    var current = load();
+    return IMPORT_ORDER.every(function (table) { return current[table].length === 0; });
   }
 
   function summary() {
@@ -576,6 +749,10 @@
       combinations: load().combinations.length,
       rated_combinations: pairTrainingSet().length,
       predictions_logged: load().predictions.length,
+      declared_preferences: Object.keys(palette()).reduce(function (total, scope) {
+        return total + Object.keys(palette()[scope]).length;
+      }, 0),
+      preference_events: load().preferences.length,
       mean_rating: ratings.length
         ? Math.round(ratings.reduce(function (a, b) { return a + b; }, 0) / ratings.length * 1000) / 1000
         : null,
@@ -585,7 +762,7 @@
 
   /* ── export ──────────────────────────────────────────────────────────────── */
 
-  /* All four files every time, headers included even when empty: a backup that
+  /* All five files every time, headers included even when empty: a backup that
    * silently omits ratings.csv is indistinguishable from one where you had no
    * ratings. */
   function exportFiles() {
@@ -698,6 +875,10 @@
     SCHEMA_VERSION: SCHEMA_VERSION,
     SUBJECT_PERFUME: SUBJECT_PERFUME,
     SUBJECT_COMBINATION: SUBJECT_COMBINATION,
+    PREFERENCE_LEVELS: PREFERENCE_LEVELS,
+    PREFERENCE_SCOPES: PREFERENCE_SCOPES,
+    FAMILIES: FAMILIES,
+    AXES: AXES,
     MIN_RATING: MIN_RATING,
     MAX_RATING: MAX_RATING,
     RATING_STEP: RATING_STEP,
@@ -711,6 +892,12 @@
     logCombination: logCombination,
     logRating: logRating,
     logPrediction: logPrediction,
+    logPreference: logPreference,
+    setPalette: setPalette,
+    preferenceEvents: preferenceEvents,
+    palette: palette,
+    hasPalette: hasPalette,
+    isEmpty: isEmpty,
     perfumes: perfumes,
     perfumesById: perfumesById,
     combinations: combinations,
