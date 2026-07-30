@@ -1,1 +1,8 @@
+# The data layer is pure standard library — none of these are needed to log,
+# migrate, or read ratings. They are for the model layer.
+numpy>=2.0            # feature vectors, the ridge solve
+scipy>=1.14           # linear algebra
+scikit-learn>=1.5     # metrics and cross-validation utilities
+
+# Desktop UI. Also needs the system Tk package: sudo apt install python3-tk
 customtkinter>=5.2.2

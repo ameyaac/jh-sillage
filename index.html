@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JH Sillage — Perfume Preference Predictor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="web/styles.css">
+</head>
+<body>
+<div class="app-shell">
+
+<!-- Topbar -->
+<header class="topbar">
+  <div class="topbar-brand">
+    <svg class="logo-svg" viewBox="0 0 28 28" fill="none" aria-label="Sillage logo">
+      <circle cx="14" cy="14" r="12" stroke="var(--color-primary)" stroke-width="1.5"/>
+      <ellipse cx="14" cy="14" rx="6" ry="9" stroke="var(--color-accent)" stroke-width="1.2" transform="rotate(30 14 14)"/>
+      <circle cx="14" cy="14" r="2.5" fill="var(--color-primary)"/>
+      <circle cx="14" cy="5.5" r="1" fill="var(--color-accent)"/>
+    </svg>
+    <div>
+      <h1>JH Sillage</h1>
+      <span>Perfume Preference Predictor</span>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <button class="btn-icon" id="downloadBtn" title="Download backup CSVs" aria-label="Download backup CSVs">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    </button>
+    <button class="btn-icon" id="themeToggle" data-theme-toggle aria-label="Toggle theme">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- Main -->
+<main>
+  <div class="main-content">
+
+    <!-- LEFT: Form -->
+    <div>
+      <div class="card">
+        <h2 class="card-title">Log a Perfume</h2>
+        <p class="card-subtitle">Enter the perfume's details. A score is predicted live as you fill in notes — then rate it for real in the log once you have worn it.</p>
+
+        <form id="perfumeForm" novalidate>
+          <div class="form-grid">
+            <!-- Brand -->
+            <div class="form-group">
+              <label for="brandName">Brand <span class="hint">optional</span></label>
+              <input type="text" id="brandName" placeholder="e.g. Chanel, Dior, Byredo">
+            </div>
+            <!-- Scent Name -->
+            <div class="form-group">
+              <label for="scentName">Scent Name <span class="hint">optional</span></label>
+              <input type="text" id="scentName" placeholder="e.g. Bleu de Chanel">
+            </div>
+          </div>
+
+          <hr class="divider">
+
+          <!-- Scent Type -->
+          <div class="form-group" style="margin-bottom: var(--space-5)">
+            <label>Scent Family <span class="hint">tap to select, tap again to clear</span></label>
+            <div class="scent-types" id="scentTypeBtns">
+              <button type="button" class="scent-type-btn" data-value="Floral">🌸 Floral</button>
+              <button type="button" class="scent-type-btn" data-value="Woody">🪵 Woody</button>
+              <button type="button" class="scent-type-btn" data-value="Oriental">🌙 Oriental</button>
+              <button type="button" class="scent-type-btn" data-value="Fresh">💧 Fresh</button>
+              <button type="button" class="scent-type-btn" data-value="Citrus">🍋 Citrus</button>
+              <button type="button" class="scent-type-btn" data-value="Aquatic">🌊 Aquatic</button>
+              <button type="button" class="scent-type-btn" data-value="Gourmand">🍫 Gourmand</button>
+              <button type="button" class="scent-type-btn" data-value="Spicy">🌶️ Spicy</button>
+              <button type="button" class="scent-type-btn" data-value="Fougère">🌿 Fougère</button>
+              <button type="button" class="scent-type-btn" data-value="Chypre">🍂 Chypre</button>
+            </div>
+            <input type="hidden" id="scentType">
+          </div>
+
+          <!-- Medium -->
+          <div class="form-group" style="margin-bottom: var(--space-5)">
+            <label for="perfumeMedium">Medium <span class="hint">optional</span></label>
+            <select id="perfumeMedium">
+              <option value="">— not specified —</option>
+              <option value="Spray Perfume (EDP)">Spray Perfume (EDP)</option>
+              <option value="Spray Perfume (EDT)">Spray Perfume (EDT)</option>
+              <option value="Spray Perfume (EDC)">Spray Perfume (EDC)</option>
+              <option value="Extrait de Parfum">Extrait de Parfum</option>
+              <option value="Attar / Oil">Attar / Oil</option>
+              <option value="Solid Perfume">Solid Perfume</option>
+              <option value="Body Mist">Body Mist</option>
+            </select>
+            <span class="input-description">Concentration and format change how long and how loudly a composition reads.</span>
+          </div>
+
+          <hr class="divider">
+
+          <!-- Top Notes -->
+          <div class="form-group full" style="margin-bottom: var(--space-4)">
+            <label>Top Notes <span class="hint">press Enter or comma to add</span></label>
+            <div class="tag-input-wrap" id="topWrap">
+              <input type="text" id="topInput" placeholder="e.g. bergamot, lemon, grapefruit" autocomplete="off">
+            </div>
+            <span class="input-description">First impression — lasts 15–30 min. Most noticeable on first spray.</span>
+          </div>
+
+          <!-- Middle Notes -->
+          <div class="form-group full" style="margin-bottom: var(--space-4)">
+            <label>Heart / Middle Notes <span class="hint">press Enter or comma to add</span></label>
+            <div class="tag-input-wrap" id="midWrap">
+              <input type="text" id="midInput" placeholder="e.g. rose, jasmine, iris" autocomplete="off">
+            </div>
+            <span class="input-description">The core character — emerges after 30 min, lasts 2–4 hrs.</span>
+          </div>
+
+          <!-- Base Notes -->
+          <div class="form-group full" style="margin-bottom: var(--space-5)">
+            <label>Base Notes <span class="hint">press Enter or comma to add</span></label>
+            <div class="tag-input-wrap" id="baseWrap">
+              <input type="text" id="baseInput" placeholder="e.g. sandalwood, musk, amber" autocomplete="off">
+            </div>
+            <span class="input-description">The dry-down — develops after 1 hr, can last 6+ hrs.</span>
+          </div>
+
+          <button type="submit" class="btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            Save &amp; Log Entry
+          </button>
+          <button type="button" class="btn-secondary" id="clearBtn">Clear Form</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- RIGHT: Prediction -->
+    <div class="prediction-panel">
+      <div class="card">
+        <p class="section-heading">Live Prediction</p>
+        <div id="scoreDisplay" class="score-empty">Fill in notes to see your predicted score</div>
+      </div>
+
+      <div class="card" id="breakdownCard" style="display:none">
+        <p class="section-heading">Score Breakdown</p>
+        <div class="breakdown" id="breakdown"></div>
+      </div>
+
+      <!-- Backup & restore -->
+      <div class="card">
+        <p class="section-heading">Backup &amp; Restore</p>
+        <p class="backup-note">
+          Your log lives in this browser only. Clearing site data, switching device or
+          using a private window loses it. Download the four CSVs regularly, and upload
+          them here to carry on where you left off.
+        </p>
+        <div class="backup-actions">
+          <button type="button" class="btn-secondary" id="downloadAllBtn" style="margin-top:0">
+            Download my log (4 CSVs)
+          </button>
+          <!-- The input is nested, so no `for` attribute: pairing both ways makes
+               some browsers open the file dialog twice. -->
+          <label class="file-drop" id="fileDrop">
+            <input type="file" id="importInput" accept=".csv,text/csv" multiple>
+            Drop your CSVs here, or click to choose<br>
+            <span class="cell-faint">perfumes · combinations · ratings · predictions</span>
+          </label>
+        </div>
+        <div class="transfer-report" id="transferReport"></div>
+      </div>
+
+      <div class="card" style="background: var(--color-surface-offset)">
+        <p class="section-heading">How It Works</p>
+        <p style="font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.7;">
+          This page still runs the <strong>placeholder</strong> scorer: it matches notes
+          against a seed like/dislike list plus whatever it can infer from perfumes you
+          have rated 4+ or 2−. It fits no parameters, so it cannot be validated — treat
+          the number as a rough guide, not a measurement.
+        </p>
+        <p style="font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.7; margin-top: var(--space-3);">
+          The real model is being built in Python and will be exported here. What matters
+          now is that <strong>your actual ratings</strong> are recorded — they are the
+          training data, and predictions are never learned from.
+        </p>
+      </div>
+    </div>
+
+    <!-- BOTTOM: Log -->
+    <div class="log-section">
+      <div class="card">
+        <div class="log-header">
+          <p class="section-heading" style="margin:0">Fragrance Log (<span id="logCount">0</span> entries)</p>
+          <p class="log-stats" id="logStats"></p>
+        </div>
+        <div class="log-wrap">
+          <table id="logTable">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Brand</th>
+                <th>Scent</th>
+                <th>Type</th>
+                <th>Top Notes</th>
+                <th>Heart Notes</th>
+                <th>Base Notes</th>
+                <th>Predicted</th>
+                <th>Your Rating</th>
+                <th>Verdict</th>
+                <th>Logged</th>
+              </tr>
+            </thead>
+            <tbody id="logBody">
+              <tr><td colspan="11" class="empty-log">No entries yet — log your first perfume above ✨</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Classic scripts, in dependency order, so the page also works opened straight
+     off the filesystem (ES modules would be blocked by file:// CORS). -->
+<script src="web/js/csv.js"></script>
+<script src="web/js/store.js"></script>
+<script src="web/js/predict.js"></script>
+<script src="web/js/app.js"></script>
+</body>
+</html>
