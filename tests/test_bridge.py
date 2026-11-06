@@ -130,6 +130,8 @@ def test_browser_export_survives_awkward_text_and_notes():
         assert ganymede.name == "Ganymede, the moon"
         assert ganymede.top_notes == ["Mandarin", "Violet Leaf"]
         assert ganymede.base_notes == ["Suede", "Ambroxan"]
+        # Several scent families share one cell and come back as a list, in order.
+        assert ganymede.perfume_types == ["Woody", "Spicy", "Fresh"]
 
         # Rating context and pair order have to cross the boundary intact.
         assert any(e.context == "hot afternoon" for e in log.rating_events())

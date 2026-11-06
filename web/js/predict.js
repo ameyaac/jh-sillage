@@ -54,12 +54,18 @@
    * left alone rather than guessed at. Oriental -> amber follows the usual modern
    * reclassification. */
   var TYPE_TO_FAMILY = {
-    Floral: 'floral', Woody: 'woody', Citrus: 'citrus', Aquatic: 'aquatic',
+    Floral: 'floral', Woody: 'woody', Citrus: 'citrus', Fruity: 'fruity', Aquatic: 'aquatic',
     Gourmand: 'gourmand', Spicy: 'spicy', Oriental: 'amber', 'Fougère': 'aromatic'
   };
 
   var SCENT_TYPE_WEIGHTS = {
-    Floral: 0.6, Woody: 0.55, Oriental: 0.45, Fresh: 0.7, Citrus: 0.75,
+    /* Fruity sits mid-range: the seed profile likes fig and pomegranate but has
+     * no broader fruity signal, so it is not given a strong lean either way. */
+    /* Sweet is a perceptual axis, not one of the 14 families, so like Fresh and
+     * Chypre it has no TYPE_TO_FAMILY mapping. Weighted between Gourmand and the
+     * middle: the seed likes vanilla and tonka but leans against gourmand. */
+    Floral: 0.6, Woody: 0.55, Oriental: 0.45, Fresh: 0.7, Citrus: 0.75, Fruity: 0.55,
+    Sweet: 0.4,
     Aquatic: 0.35, Gourmand: 0.25, Spicy: 0.35, 'Fougère': 0.6, Chypre: 0.4,
     Aromatic: 0.5, Musk: 0.5
   };
@@ -121,7 +127,20 @@
     return { score: 0, known: false }; /* was 0.1 — an unknown note now abstains */
   }
 
-  /* trainingSet: [{perfume, rating}] from actual ratings only.
+  /* Scent families arrive as an array from the form, or as a ";"-joined string
+   * straight from a stored perfume. Either way: trimmed, blanks dropped, deduped. */
+  function normaliseFamilies(value) {
+    var items = Array.isArray(value) ? value : String(value || '').split(';');
+    var out = [];
+    items.forEach(function (raw) {
+      var f = String(raw == null ? '' : raw).trim();
+      if (f && out.indexOf(f) === -1) out.push(f);
+    });
+    return out;
+  }
+
+  /* scentType: one family, a list of them, or a ";"-joined string.
+   * trainingSet: [{perfume, rating}] from actual ratings only.
    * palette: {scope: {key: weight}} from Store.palette(), or null. */
   function run(topNotes, midNotes, baseNotes, scentType, trainingSet, palette, medium) {
     var total = topNotes.length + midNotes.length + baseNotes.length;
@@ -149,18 +168,32 @@
     var parts = [topScore, midScore, baseScore].filter(function (s) { return s !== null; });
     var combined = parts.reduce(function (a, b) { return a + b; }, 0) / parts.length;
 
-    var typeBonus = (scentType && SCENT_TYPE_WEIGHTS[scentType] !== undefined)
-      ? SCENT_TYPE_WEIGHTS[scentType] : 0.3;
+    /* A perfume can sit in several families. Each selected family contributes
+     * equally: the type bonus is their mean weight, so ticking more families does
+     * not inflate the score. */
+    var families = normaliseFamilies(scentType);
+    var known = families.filter(function (f) { return SCENT_TYPE_WEIGHTS[f] !== undefined; });
+    var typeBonus = known.length
+      ? known.reduce(function (sum, f) { return sum + SCENT_TYPE_WEIGHTS[f]; }, 0) / known.length
+      : 0.3;
 
-    /* A declared family preference, applied only when the selected scent family
-     * maps onto the taxonomy. Deliberately a small nudge: it is one stated opinion,
-     * not an observation. */
-    var familyAdjust = 0, familyUsed = null;
-    var mapped = TYPE_TO_FAMILY[scentType];
-    if (mapped && palette && palette.family && palette.family[mapped] !== undefined) {
-      familyAdjust = palette.family[mapped] * 0.25;
-      familyUsed = mapped;
+    /* Declared family preferences, applied only for selected families that map
+     * onto the taxonomy. Averaged over the matches, so the total stays a small
+     * nudge however many families are ticked: it is stated opinion, not evidence. */
+    var familiesUsed = [];
+    if (palette && palette.family) {
+      families.forEach(function (f) {
+        var mapped = TYPE_TO_FAMILY[f];
+        if (mapped && palette.family[mapped] !== undefined &&
+            familiesUsed.indexOf(mapped) === -1) {
+          familiesUsed.push(mapped);
+        }
+      });
     }
+    var familyAdjust = familiesUsed.length
+      ? familiesUsed.reduce(function (sum, m) { return sum + palette.family[m]; }, 0) /
+        familiesUsed.length * 0.25
+      : 0;
 
     /* A declared medium preference, matched exactly against the form's options. */
     var mediumAdjust = 0, mediumUsed = null;
@@ -177,7 +210,10 @@
     if (topScore !== null) breakdown['Top Notes'] = rescale(topScore / 1.0);
     if (midScore !== null) breakdown['Heart Notes'] = rescale(midScore / 1.3);
     if (baseScore !== null) breakdown['Base Notes'] = rescale(baseScore / 1.2);
-    if (scentType) breakdown['Scent Family'] = Math.round(typeBonus * 5 * 10) / 10;
+    if (families.length) {
+      breakdown[families.length > 1 ? 'Scent Families' : 'Scent Family'] =
+        Math.round(typeBonus * 5 * 10) / 10;
+    }
 
     return {
       total: Math.round(score * 10) / 10,
@@ -187,8 +223,12 @@
       unknownNotes: unknown,
       knownFraction: total ? (total - unknown.length) / total : 0,
       ratingsUsed: learned.count,
-      declarationsUsed: declared.count + (familyUsed ? 1 : 0) + (mediumUsed ? 1 : 0),
-      declaredFamily: familyUsed,
+      declarationsUsed: declared.count + familiesUsed.length + (mediumUsed ? 1 : 0),
+      /* First matched family, kept for callers that expect one; the full list is
+       * declaredFamilies. */
+      declaredFamily: familiesUsed.length ? familiesUsed[0] : null,
+      declaredFamilies: familiesUsed,
+      families: families,
       declaredMedium: mediumUsed
     };
   }
@@ -221,6 +261,7 @@
     MODEL_VERSION: MODEL_VERSION,
     TYPE_TO_FAMILY: TYPE_TO_FAMILY,
     run: run,
+    normaliseFamilies: normaliseFamilies,
     verdict: verdict,
     learnedPreferences: learnedPreferences,
     declaredNotes: declaredNotes

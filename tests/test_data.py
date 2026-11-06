@@ -71,6 +71,25 @@ def test_note_casing_is_preserved_and_duplicates_collapse():
         assert log.perfumes()[0].top_notes == ["Black Pepper", "Yuzu"]
 
 
+def test_multiple_scent_families_round_trip():
+    with tempfile.TemporaryDirectory() as tmp:
+        log = _log(tmp)
+        # A list or a ";"-joined string both work; blanks and repeats drop out.
+        log.log_perfume(_perfume(perfume_type=["Woody", "Spicy", " woody ", ""]))
+        log.log_perfume(_perfume(name="Other", perfume_type="Citrus; Fresh"))
+        log.log_perfume(_perfume(name="Single", perfume_type="Floral"))
+        log.log_perfume(_perfume(name="None", perfume_type=""))
+
+        first, second, single, none = RatingLog(tmp).perfumes()
+        assert first.perfume_types == ["Woody", "Spicy"]
+        assert first.perfume_type == "Woody;Spicy"
+        assert second.perfume_types == ["Citrus", "Fresh"]
+        # A one-family log written before multi-family support reads back unchanged.
+        assert single.perfume_type == "Floral"
+        assert single.perfume_types == ["Floral"]
+        assert none.perfume_types == []
+
+
 def test_meta_written_and_version_enforced():
     with tempfile.TemporaryDirectory() as tmp:
         log = _log(tmp)
@@ -534,7 +553,8 @@ def test_family_and_axis_keys_are_normalised():
 
 def test_a_v1_log_is_upgraded_in_place():
     # v1 -> v2 added preferences.csv, which is purely additive: an absent table reads
-    # as an empty one, so refusing to open would be over-strict.
+    # as an empty one, so refusing to open would be over-strict. (It lands on the
+    # current version, v3, in one step.)
     with tempfile.TemporaryDirectory() as tmp:
         log = _log(tmp)
         log.log_perfume(_perfume())
@@ -546,6 +566,24 @@ def test_a_v1_log_is_upgraded_in_place():
         meta = json.loads(reopened.meta_path.read_text())
         assert meta["schema_version"] == SCHEMA_VERSION
         assert meta["upgrades"][0]["from"] == 1
+
+
+def test_v2_and_v3_logs_are_upgraded_to_the_current_version_in_place():
+    # v2 -> v3 lets perfume_type hold several families; a v2 single family is
+    # already a valid one-element list. v3 -> v4 changed no format. Either way the
+    # upgrade only rewrites the version.
+    assert SCHEMA_VERSION == 6
+    for old in (2, 3, 4, 5):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = _log(tmp)
+            log.log_perfume(_perfume(perfume_type="Woody;Spicy" if old >= 3 else "Woody"))
+            log.meta_path.write_text(json.dumps({"schema_version": old}))
+
+            reopened = RatingLog(tmp)
+            assert reopened.perfumes()[0].perfume_types[0] == "Woody"
+            meta = json.loads(reopened.meta_path.read_text())
+            assert meta["schema_version"] == SCHEMA_VERSION
+            assert meta["upgrades"][0] == {**meta["upgrades"][0], "from": old, "to": SCHEMA_VERSION}
 
 
 # ── legacy taste profile ──────────────────────────────────────────────────────

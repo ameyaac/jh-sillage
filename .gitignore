@@ -1,10 +1,40 @@
-# Files
-code
-taste_profile.json
-sillage_log.csv
+# ── User data ─────────────────────────────────────────────────────────────────
+# The rating log is personal and is the one thing here that cannot be regenerated.
+# Back it up outside git; do not commit it.
+/userdata/
+# If you point SILLAGE_DATA_DIR somewhere else, keep that path outside the repo —
+# gitignore cannot expand environment variables, so it will not be covered here.
 
-# Folders
-.vscode/
-.venv/
+# Legacy logs, kept ignored so a stale copy can never shadow the migrated log
+# sillage_log.csv
+# jh-sillage_perfume-data.csv
+*.csv
+taste_profile.json
+smell-profile.json
+
+# ── Generated artifacts ───────────────────────────────────────────────────────
+# Trained models and the JS bundle emitted for index.html are build outputs.
+/artifacts/
+/build/
+ui/generated/
+
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 **/__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ── Editors & OS ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# ── Archives ──────────────────────────────────────────────────────────────────
+*.zip
+code

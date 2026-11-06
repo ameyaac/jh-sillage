@@ -104,7 +104,9 @@ class RatingLog:
         Reading a newer log with older code would parse some columns and silently
         drop others, which is worse than failing. Older logs are upgraded in place
         when the difference is purely additive — a v1 log has no preferences.csv,
-        and an absent table reads as an empty one.
+        and an absent table reads as an empty one; a v2 perfume_type holds one
+        scent family, which is a valid one-element v3 family list; v3 -> v4 onward
+        changed no file format at all.
         """
         if not self.meta_path.exists():
             self._write_meta({"schema_version": SCHEMA_VERSION, "created_at": now_stamp()})

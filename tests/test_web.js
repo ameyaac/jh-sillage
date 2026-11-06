@@ -282,6 +282,62 @@ tests['export writes all five files even when empty'] = () => {
   files.forEach((f) => assert.ok(f.text.split('\r\n')[0].length, `${f.name} needs a header`));
 };
 
+tests['deleting a perfume cascades to its ratings, predictions and pairs'] = () => {
+  const { Store } = boot();
+  const [a, b] = pair(Store);
+  const c = Store.logPerfume(withPerfume({ brand: 'Other', name: 'Keeper' }));
+  const combo = Store.logCombination(a.perfume_id, b.perfume_id, 'a');
+  const kept = Store.logCombination(b.perfume_id, c.perfume_id, '');
+  Store.logRating({ perfumeId: a.perfume_id, rating: 4.5 });
+  Store.logRating({ perfumeId: b.perfume_id, rating: 3.0 });
+  Store.logRating({ combinationId: combo.combination_id, rating: 4.0 });
+  Store.logRating({ combinationId: kept.combination_id, rating: 2.5 });
+  Store.logPrediction({ subjectId: a.perfume_id, value: 4.2, modelVersion: 'x' });
+  Store.logPrediction({ subjectType: 'combination', subjectId: combo.combination_id, value: 3.9, modelVersion: 'x' });
+
+  eq(Store.deletionImpact(a.perfume_id), { pairs: 1, ratings: 1 });
+  const removed = Store.deletePerfume(a.perfume_id);
+  eq(removed, { perfumes: 1, combinations: 1, ratings: 2, predictions: 2 });
+
+  eq(Store.perfumes().map((p) => p.perfume_id), [b.perfume_id, c.perfume_id]);
+  eq(Store.combinations().map((x) => x.combination_id), [kept.combination_id]);
+  /* Nothing left pointing at the deleted perfume or pair. */
+  assert.ok(Store.ratingEvents().every((r) => !(r.subject_type === 'perfume' && r.subject_id === a.perfume_id)));
+  assert.ok(Store.ratingEvents().every((r) => !(r.subject_type === 'combination' && r.subject_id === combo.combination_id)));
+  assert.strictEqual(Store.predictions().length, 0);
+  eq(Store.trainingSet().map((t) => t.rating), [3.0]);
+  eq(Store.pairTrainingSet().map((t) => t.rating), [2.5]);
+  /* And the export still imports cleanly, i.e. no orphans. */
+  const report = boot().Store.prepareImport(Store.exportFiles());
+  assert.strictEqual(report.rejected, 0, JSON.stringify(report.tables));
+};
+
+tests['deleting a pair leaves its perfumes alone'] = () => {
+  const { Store } = boot();
+  const [a, b] = pair(Store);
+  const combo = Store.logCombination(a.perfume_id, b.perfume_id, '');
+  Store.logRating({ combinationId: combo.combination_id, rating: 4.0 });
+  eq(Store.deleteCombination(combo.combination_id), { combinations: 1, ratings: 1, predictions: 0 });
+  assert.strictEqual(Store.combinations().length, 0);
+  assert.strictEqual(Store.perfumes().length, 2);
+  assert.throws(() => Store.deleteCombination(combo.combination_id));
+};
+
+tests['a snapshot undoes a delete exactly, and survives a reload'] = () => {
+  const storage = makeLocalStorage();
+  const { Store } = boot(storage);
+  const [a, b] = pair(Store);
+  Store.logCombination(a.perfume_id, b.perfume_id, 'b');
+  Store.logRating({ perfumeId: a.perfume_id, rating: 4.5 });
+  const before = Store.summary();
+  const snap = Store.snapshot();
+  Store.deletePerfume(a.perfume_id);
+  assert.notDeepStrictEqual(Store.summary(), before);
+  Store.restoreSnapshot(snap);
+  eq(Store.summary(), JSON.parse(JSON.stringify(before)));
+  eq(boot(storage).Store.summary(), JSON.parse(JSON.stringify(before)));
+};
+
 tests['export and import round trip is lossless'] = () => {
   const { Store } = boot();
   const [a, b] = pair(Store);
@@ -448,8 +504,44 @@ tests['a v1 log in localStorage is upgraded, not discarded'] = () => {
   eq(Store.trainingSet().map((t) => t.rating), [4.5]);
   eq(Store.palette(), {});
   /* Persisted under the new key, with the old one left as an accidental backup. */
-  assert.ok(storage.getItem('sillage.log.v2'), 'should be saved under the v2 key');
-  assert.strictEqual(JSON.parse(storage.getItem('sillage.log.v2')).schema_version, 2);
+  assert.ok(storage.getItem('sillage.log.v6'), 'should be saved under the v6 key');
+  assert.strictEqual(JSON.parse(storage.getItem('sillage.log.v6')).schema_version, 6);
+};
+
+tests['a v3 log in localStorage is upgraded to v6, nothing lost'] = () => {
+  const storage = makeLocalStorage([['sillage.log.v3', JSON.stringify({
+    schema_version: 3,
+    perfumes: [{
+      perfume_id: 1, brand: 'Dior', name: 'Sauvage', perfume_type: 'Woody;Spicy',
+      perfume_medium: '', perfume_strength: '', top_notes: ['bergamot'],
+      middle_notes: [], base_notes: [], comment: '', logged_at: '2026-01-01T00:00:00'
+    }],
+    combinations: [], ratings: [], predictions: [], preferences: []
+  })]]);
+  const { Store } = boot(storage, { quiet: true });
+  eq(Store.perfumes().map((p) => Store.perfumeTypes(p)), [['Woody', 'Spicy']]);
+  assert.strictEqual(JSON.parse(storage.getItem('sillage.log.v6')).schema_version, 6);
+  assert.ok(storage.getItem('sillage.log.v3'), 'the v3 key is left alone as a backup');
+};
+
+tests['a v2 log in localStorage is upgraded to v6, single families intact'] = () => {
+  const storage = makeLocalStorage([['sillage.log.v2', JSON.stringify({
+    schema_version: 2,
+    perfumes: [{
+      perfume_id: 1, brand: 'Dior', name: 'Sauvage', perfume_type: 'Woody',
+      perfume_medium: '', perfume_strength: '', top_notes: ['bergamot'],
+      middle_notes: [], base_notes: [], comment: '', logged_at: '2026-01-01T00:00:00'
+    }],
+    combinations: [], ratings: [], predictions: [],
+    preferences: [{ preference_id: 1, scope: 'family', key: 'woody', weight: 1,
+      declared_at: '2026-01-01T00:00:00' }]
+  })]]);
+  const { Store } = boot(storage, { quiet: true });
+  eq(Store.perfumes().map((p) => Store.perfumeTypes(p)), [['Woody']]);
+  eq(Store.palette().family, { woody: 1 });
+  assert.strictEqual(JSON.parse(storage.getItem('sillage.log.v6')).schema_version, 6);
+  /* The v2 key is left alone as an accidental backup. */
+  assert.ok(storage.getItem('sillage.log.v2'));
 };
 
 tests['preferences survive the export/import round trip'] = () => {
@@ -526,6 +618,51 @@ tests['a declared family preference applies only via a mapped scent family'] = (
   /* Chypre has no single family in the taxonomy, so nothing is applied. */
   const unmapped = Predict.run(['bergamot'], [], [], 'Chypre', [], palette, '');
   assert.strictEqual(unmapped.declaredFamily, null);
+};
+
+tests['a perfume can be logged with several scent families'] = () => {
+  const { Store } = boot();
+  const saved = Store.logPerfume(withPerfume({ perfume_type: ['Woody', 'Spicy', 'woody', ' '] }));
+  assert.strictEqual(saved.perfume_type, 'Woody;Spicy');
+  eq(Store.perfumeTypes(saved), ['Woody', 'Spicy']);
+
+  /* A single family, and the old string form, are still accepted as-is. */
+  const single = Store.logPerfume(withPerfume({ name: 'Single', perfume_type: 'Floral' }));
+  eq(Store.perfumeTypes(single), ['Floral']);
+
+  /* And the list survives a CSV round trip. */
+  const fresh = boot().Store;
+  fresh.applyImport(fresh.prepareImport(Store.exportFiles()));
+  eq(fresh.perfumes().map((p) => Store.perfumeTypes(p)), [['Woody', 'Spicy'], ['Floral']]);
+};
+
+tests['several scent families average rather than stack'] = () => {
+  const { Predict } = boot();
+  const citrus = Predict.run(['bergamot'], [], [], ['Citrus'], [], null, '');
+  const gourmand = Predict.run(['bergamot'], [], [], ['Gourmand'], [], null, '');
+  const both = Predict.run(['bergamot'], [], [], ['Citrus', 'Gourmand'], [], null, '');
+  assert.ok(both.total <= citrus.total && both.total >= gourmand.total,
+    'two families must land between their individual scores');
+  assert.ok('Scent Families' in both.breakdown);
+  eq(both.families, ['Citrus', 'Gourmand']);
+
+  /* A stored ";"-joined value is read the same way as the form's array. */
+  eq(Predict.run(['bergamot'], [], [], 'Citrus;Gourmand', [], null, '').total, both.total);
+
+  /* Declared family preferences apply for every mapped family that was ticked. */
+  const palette = { family: { woody: -1.0, spicy: -1.0 } };
+  const declared = Predict.run(['bergamot'], [], [], ['Woody', 'Spicy', 'Chypre'], [], palette, '');
+  eq(declared.declaredFamilies, ['woody', 'spicy']);
+  assert.strictEqual(declared.declaredFamily, 'woody');
+};
+
+tests['the Fruity scent family maps onto the fruity palette family'] = () => {
+  const { Predict, Store } = boot();
+  assert.ok(Store.FAMILIES.indexOf(Predict.TYPE_TO_FAMILY.Fruity) !== -1);
+  const loved = Predict.run(['bergamot'], [], [], ['Fruity'], [], { family: { fruity: 1.0 } }, '');
+  const plain = Predict.run(['bergamot'], [], [], ['Fruity'], [], null, '');
+  assert.strictEqual(loved.declaredFamily, 'fruity');
+  assert.ok(loved.total > plain.total);
 };
 
 tests['a declared medium preference applies on exact match'] = () => {
@@ -660,8 +797,10 @@ tests['every download trigger in the markup is wired up'] = () => {
 tests['scripts load in dependency order and are classic, not modules'] = () => {
   const srcs = (INDEX_HTML.match(/<script src="([^"]+)"/g) || [])
     .map((m) => m.replace(/.*"([^"]+)"/, '$1'));
-  eq(srcs, ['web/js/csv.js', 'web/js/store.js', 'web/js/predict.js',
-    'web/js/preferences.js', 'web/js/app.js']);
+  /* theme.js first (in <head>, so the saved theme applies before paint); it has
+   * no dependencies. layering.js needs Store and Predict, and app.js needs all. */
+  eq(srcs, ['web/js/theme.js', 'web/js/csv.js', 'web/js/store.js', 'web/js/predict.js',
+    'web/js/preferences.js', 'web/js/layering.js', 'web/js/app.js']);
   assert.ok(!/<script[^>]*type="module"/.test(INDEX_HTML),
     'ES modules are blocked by file:// CORS; keep these classic scripts');
 };
@@ -674,6 +813,7 @@ function emit(dir) {
   const a = Store.logPerfume(withPerfume({
     brand: 'Marc-Antoine Barrois "B683"',
     name: 'Ganymede, the moon',
+    perfume_type: ['Woody', 'Spicy', 'Fresh'],
     top_notes: ['Mandarin', 'Violet Leaf'],
     middle_notes: ['Osmanthus Tincture'],
     base_notes: ['Suede', 'Ambroxan']

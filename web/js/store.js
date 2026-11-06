@@ -25,13 +25,20 @@
   var Sillage = root.Sillage = root.Sillage || {};
   var Csv = Sillage.Csv;
 
-  var SCHEMA_VERSION = 2;
-  var STORAGE_KEY = 'sillage.log.v2';
-  /* Older keys, newest first. Read once on first load and upgraded in place —
-   * v1 -> v2 added preferences, which is purely additive. */
-  var LEGACY_STORAGE_KEYS = ['sillage.log.v1'];
+  /* The version goes up with every release, so it also names the app version.
+   * Older keys, newest first, are read once on first load and upgraded in place.
+   * Every upgrade so far is purely additive:
+   *   v1 -> v2 added preferences.
+   *   v2 -> v3 lets perfume_type hold several ";"-joined scent families; a v2
+   *            single-family cell is already a valid one-element v3 list.
+   *   v3 -> v4 no format change: layering page, deleting entries, themes.
+   *   v4 -> v5 no format change: Appearance became a centred dialog.
+   *   v5 -> v6 no format change: Appearance dialog flows as one column. */
+  var SCHEMA_VERSION = 6;
+  var STORAGE_KEY = 'sillage.log.v6';
+  var LEGACY_STORAGE_KEYS = ['sillage.log.v5', 'sillage.log.v4', 'sillage.log.v3', 'sillage.log.v2', 'sillage.log.v1'];
   /* Schema versions this build can read and upgrade in place. */
-  var UPGRADABLE_FROM = [1];
+  var UPGRADABLE_FROM = [1, 2, 3, 4, 5];
   var NOTE_SEPARATOR = ';';
   var MIN_RATING = 1.0, MAX_RATING = 5.0, RATING_STEP = 0.5;
 
@@ -129,6 +136,18 @@
     return out;
   }
 
+  /* A perfume can belong to several scent families. They share one cell, joined
+   * like a note layer, so a single family reads back unchanged. Mirrors
+   * schema.clean_families. */
+  function cleanFamilies(value) {
+    var items = Array.isArray(value) ? value : parseNotes(value);
+    return cleanNotes(items, 'family');
+  }
+
+  function perfumeTypes(perfume) {
+    return parseNotes(perfume && perfume.perfume_type);
+  }
+
   /* ── identity ────────────────────────────────────────────────────────────── */
 
   /* Concentration terms only — flanker words like "Intense" usually mean a
@@ -186,7 +205,7 @@
       perfume_id: record.perfume_id,
       brand: str(record.brand),
       name: str(record.name),
-      perfume_type: str(record.perfume_type),
+      perfume_type: formatNotes(cleanFamilies(record.perfume_type)),
       perfume_medium: str(record.perfume_medium),
       perfume_strength: str(record.perfume_strength),
       top_notes: top,
@@ -871,6 +890,85 @@
     save();
   }
 
+  /* ── deletion ────────────────────────────────────────────────────────────────
+   * The log is append-only for *changes* (a re-rating is a new event), but a
+   * whole entry can be removed. Deletes cascade so nothing is left pointing at a
+   * record that no longer exists: a rating or prediction for a deleted subject
+   * would otherwise be an orphan that silently skews summaries and exports.
+   *
+   * Ids are max + 1, so deleting the newest perfume frees its id for the next one.
+   * That is safe because the cascade has removed every reference to it. */
+
+  function isAbout(record, subjectType, ids) {
+    return record.subject_type === subjectType && ids[record.subject_id];
+  }
+
+  /* What deleting this perfume would also remove — for the confirm dialog. */
+  function deletionImpact(perfumeId) {
+    var id = asInt(perfumeId, 'perfumeId');
+    var pairs = load().combinations.filter(function (c) {
+      return c.perfume_id_a === id || c.perfume_id_b === id;
+    });
+    var ratings = ratingEvents(SUBJECT_PERFUME).filter(function (r) { return r.subject_id === id; });
+    return { pairs: pairs.length, ratings: ratings.length };
+  }
+
+  function removeSubjects(current, subjectType, ids) {
+    var before = { ratings: current.ratings.length, predictions: current.predictions.length };
+    current.ratings = current.ratings.filter(function (r) { return !isAbout(r, subjectType, ids); });
+    current.predictions = current.predictions.filter(function (p) { return !isAbout(p, subjectType, ids); });
+    return {
+      ratings: before.ratings - current.ratings.length,
+      predictions: before.predictions - current.predictions.length
+    };
+  }
+
+  function deleteCombination(combinationId) {
+    var id = asInt(combinationId, 'combinationId');
+    var current = load();
+    if (!combinationsById()[id]) fail('no combination with id ' + id);
+    var ids = Object.create(null); ids[id] = true;
+    current.combinations = current.combinations.filter(function (c) { return c.combination_id !== id; });
+    var removed = removeSubjects(current, SUBJECT_COMBINATION, ids);
+    save();
+    return { combinations: 1, ratings: removed.ratings, predictions: removed.predictions };
+  }
+
+  function deletePerfume(perfumeId) {
+    var id = asInt(perfumeId, 'perfumeId');
+    var current = load();
+    if (!perfumesById()[id]) fail('no perfume with id ' + id);
+
+    /* Pairs containing it go too, with their own ratings and predictions. */
+    var pairIds = Object.create(null), pairCount = 0;
+    current.combinations.forEach(function (c) {
+      if (c.perfume_id_a === id || c.perfume_id_b === id) { pairIds[c.combination_id] = true; pairCount++; }
+    });
+    current.combinations = current.combinations.filter(function (c) { return !pairIds[c.combination_id]; });
+    var pairRemoved = removeSubjects(current, SUBJECT_COMBINATION, pairIds);
+
+    var self = Object.create(null); self[id] = true;
+    current.perfumes = current.perfumes.filter(function (p) { return p.perfume_id !== id; });
+    var removed = removeSubjects(current, SUBJECT_PERFUME, self);
+    save();
+    return {
+      perfumes: 1,
+      combinations: pairCount,
+      ratings: removed.ratings + pairRemoved.ratings,
+      predictions: removed.predictions + pairRemoved.predictions
+    };
+  }
+
+  /* For undo: a deep copy of the whole log, and a way to put it back. */
+  function snapshot() { return JSON.parse(JSON.stringify(load())); }
+
+  function restoreSnapshot(snap) {
+    if (!snap || snap.schema_version !== SCHEMA_VERSION) fail('not a snapshot from this log');
+    state = JSON.parse(JSON.stringify(snap));
+    save();
+    return summary();
+  }
+
   Sillage.Store = {
     SCHEMA_VERSION: SCHEMA_VERSION,
     SUBJECT_PERFUME: SUBJECT_PERFUME,
@@ -887,6 +985,8 @@
     groupKey: groupKey,
     parseNotes: parseNotes,
     formatNotes: formatNotes,
+    cleanFamilies: cleanFamilies,
+    perfumeTypes: perfumeTypes,
     cleanNotes: cleanNotes,
     logPerfume: logPerfume,
     logCombination: logCombination,
@@ -914,6 +1014,11 @@
     identify: identify,
     prepareImport: prepareImport,
     applyImport: applyImport,
-    reset: reset
+    reset: reset,
+    deletePerfume: deletePerfume,
+    deleteCombination: deleteCombination,
+    deletionImpact: deletionImpact,
+    snapshot: snapshot,
+    restoreSnapshot: restoreSnapshot
   };
 })(window);

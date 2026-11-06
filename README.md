@@ -14,6 +14,7 @@ is right. Nothing about scent semantics is ever authored in JS, and
 **Jump to:** [Setup](#setup) · [Your data](#your-data) ·
 [Backup and restore](#backup-and-restore) ·
 [Working on the web app](#working-on-the-web-app) ·
+[Deploying](#deploying-to-github-pages) ·
 [How a perfume becomes numbers](#how-a-perfume-becomes-numbers) · [FAQ](#faq) ·
 [Layout](#layout) · [More information](#more-information)
 
@@ -365,6 +366,82 @@ validation from committing, and `Store.exportFiles()` returns
 
 ---
 
+## Deploying to GitHub Pages
+
+The web app is fully static — no build step, no server, and every asset path is relative
+— so Pages serves it as-is, including from a subpath like
+`https://<user>.github.io/jh-sillage/`.
+
+### Read this first: your data does not come with it
+
+**`localStorage` is per-origin.** `file:///…/index.html` and
+`https://<user>.github.io/jh-sillage/` are different origins with completely separate
+storage, so the deployed page starts empty even though the local one has your log. This
+is not a bug and there is no setting that changes it.
+
+So the order matters:
+
+1. On your **local** page, open *Backup & Restore* → **Download my log** (5 CSVs).
+2. Deploy.
+3. On the **deployed** page, drop those CSVs into the import box and confirm.
+
+Same applies in reverse, and to every origin independently — `file://`, `localhost` and
+the Pages URL are three separate stores. Treat the CSVs as the thing that moves; the
+browser is just where a copy happens to live.
+
+### It is public
+
+GitHub Pages sites are public, and on a free account the repo must be public too. Two
+consequences:
+
+- **`userdata/` must stay out of git.** It already is, and `.gitignore` also covers
+  `sillage_log.csv`, `taste_profile.json` and `smell-profile.json`. Verify with
+  `git status --ignored` before the first push — a rating log pushed once is public
+  history even after deletion.
+- **The whole branch is served**, so `data/schema.py`, `tests/` and everything else
+  becomes fetchable over HTTP. That's fine — it's source, not secrets — but know it.
+
+Anyone with the URL can *use* the app, and their data stays in their own browser. No
+server means no accounts and nothing shared.
+
+### Steps
+
+```bash
+# 1. Commit. (The repo currently has no commits and is on `master`.)
+git branch -M main
+git add .
+git commit -m "Sillage: data layer, web app, docs"
+
+# 2. Create an EMPTY public repo on github.com — no README, no .gitignore — then:
+git remote add origin https://github.com/<user>/jh-sillage.git
+git push -u origin main
+```
+
+Then in the repo: **Settings → Pages → Build and deployment → Source: Deploy from a
+branch → Branch: `main` / `(root)` → Save.** First build takes a minute or two; the URL
+appears on that same page.
+
+### Optional touches
+
+- **`.nojekyll`** — an empty file at the repo root skips Jekyll processing. Not strictly
+  needed here (nothing in the deployed set starts with `_` or `.`), but it removes a
+  class of surprise and speeds the build: `touch .nojekyll && git add -f .nojekyll`.
+- **Fonts** come from the Google Fonts CDN. Fine online; the page falls back to Georgia
+  and a system sans if that's blocked. Self-host them under `web/` if you want it fully
+  offline.
+- **Publishing only the web assets** — if serving the Python source bothers you, add a
+  GitHub Actions workflow that uploads just `index.html` and `web/` as the Pages
+  artifact, instead of deploying from a branch. More moving parts; only worth it if you
+  actually care.
+
+### Caching
+
+Pages sets a short cache lifetime, but a hard-reload (Ctrl/Cmd+Shift+R) is the reliable
+way to see a fresh `web/js/*.js` after a push. If you deploy often, append a version
+query to the script tags (`web/js/app.js?v=2`).
+
+---
+
 ## How a perfume becomes numbers
 
 The design guide for the feature layer. Nothing here touches a perfume name, brand or
@@ -534,8 +611,9 @@ Two independent stores linked by CSV: the browser keeps its log in `localStorage
 automatically — the CSVs are the transport.
 
 **I opened the page on my phone and it's empty.**
-Expected. `localStorage` is per-browser. Download the CSVs on the first device and upload
-them on the second.
+Expected. `localStorage` is per-browser *and* per-origin. Download the CSVs on the first
+device and upload them on the second. The same applies after deploying — see
+[Deploying](#deploying-to-github-pages).
 
 **Why can't I merge two logs?**
 Restore is replace-only. Merging needs id remapping, and a half-correct remap silently
