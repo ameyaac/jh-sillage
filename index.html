@@ -2,12 +2,18 @@
 <html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1d1b18" media="(prefers-color-scheme: dark)">
 <title>JH Sillage — Perfume Preference Predictor</title>
+<!-- The logo as the tab icon. theme.js recolours it to match the active theme. -->
+<link rel="icon" id="favicon" type="image/svg+xml" href="web/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300..600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="web/styles.css">
+<!-- In <head> on purpose: applies the saved theme before first paint. -->
+<script src="web/js/theme.js"></script>
 </head>
 <body>
 <div class="app-shell">
@@ -23,18 +29,48 @@
     </svg>
     <div>
       <h1>JH Sillage</h1>
-      <span>Perfume Preference Predictor</span>
+      <span class="topbar-tagline">Perfume Preference Predictor</span>
     </div>
   </div>
-  <nav class="topbar-nav" role="tablist" aria-label="Sections">
-    <button type="button" class="nav-tab" data-view-target="log" role="tab" aria-selected="true">Log</button>
-    <button type="button" class="nav-tab" data-view-target="preferences" role="tab" aria-selected="false">Preferences</button>
+  <nav class="topbar-nav" aria-label="Main">
+    <ul class="nav-list">
+      <li>
+        <a href="#log" class="nav-link" data-view-target="log" aria-current="page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/></svg>
+          Log
+        </a>
+      </li>
+      <li>
+        <a href="#preferences" class="nav-link" data-view-target="preferences">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+          Preferences
+        </a>
+      </li>
+      <li>
+        <a href="#layering" class="nav-link" data-view-target="layering">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg>
+          Layering
+        </a>
+      </li>
+      <li>
+        <a href="#backup" class="nav-link" data-view-target="backup">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+          Backup
+        </a>
+      </li>
+    </ul>
   </nav>
   <div class="topbar-actions">
-    <button class="btn-icon" id="downloadBtn" title="Download backup CSVs" aria-label="Download backup CSVs">
+    <button class="btn-icon" id="downloadBtn" title="Back up — download my log (5 CSVs)" aria-label="Back up: download my log">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
     </button>
-    <button class="btn-icon" id="themeToggle" data-theme-toggle aria-label="Toggle theme">
+    <button class="btn-icon" id="restoreBtn" title="Restore — upload backup CSVs" aria-label="Restore: upload backup CSVs">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    </button>
+    <button class="btn-icon" id="themeBtn" title="Appearance — themes and colours" aria-label="Appearance settings" aria-haspopup="dialog">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22a10 10 0 1 1 10-10c0 2.8-2.2 4-4 4h-1.8a1.7 1.7 0 0 0-1.2 2.9c.5.5.7 1.1.5 1.7-.3.9-1.4 1.4-3.5 1.4z"/><circle cx="7.5" cy="10.5" r="1.2" fill="currentColor"/><circle cx="12" cy="7" r="1.2" fill="currentColor"/><circle cx="16.5" cy="10.5" r="1.2" fill="currentColor"/></svg>
+    </button>
+    <button class="btn-icon" id="themeToggle" data-theme-toggle aria-label="Toggle light or dark mode">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
     </button>
   </div>
@@ -43,16 +79,44 @@
 <!-- Main -->
 <main>
   <!-- LOG VIEW -->
-  <div class="main-content" id="viewLog" data-view="log">
+  <div class="main-content log-view" id="viewLog" data-view="log">
+
+    <!-- TOP: how the score is made, read before trusting the number -->
+    <section class="how-card" aria-labelledby="howTitle">
+      <div class="how-icon" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      </div>
+      <div class="how-body">
+        <p class="section-heading" id="howTitle">How It Works</p>
+        <div class="how-text">
+          <p>
+            This page still runs the <strong>placeholder</strong> scorer: it matches notes
+            against a seed like/dislike list plus whatever it can infer from perfumes you
+            have rated 4+ or 2−. It fits no parameters, so it cannot be validated — treat
+            the number as a rough guide, not a measurement.
+          </p>
+          <p>
+            The real model is being built in Python and will be exported here. What matters
+            now is that <strong>your actual ratings</strong> are recorded — they are the
+            training data, and predictions are never learned from.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Form + side panel share their own grid, so the sticky side panel's
+         scroll range ends with the form and can never slide over the log. -->
+    <div class="log-top">
 
     <!-- LEFT: Form -->
     <div>
-      <div class="card">
+      <div class="card form-card">
         <h2 class="card-title">Log a Perfume</h2>
         <p class="card-subtitle">Enter the perfume's details. A score is predicted live as you fill in notes — then rate it for real in the log once you have worn it.</p>
 
         <form id="perfumeForm" novalidate>
-          <div class="form-grid">
+          <!-- Identity: 1 column on phones, 2 on tablets, 3 when the card is wide -->
+          <div class="form-grid form-grid-identity">
             <!-- Brand -->
             <div class="form-group">
               <label for="brandName">Brand <span class="hint">optional</span></label>
@@ -63,85 +127,91 @@
               <label for="scentName">Scent Name <span class="hint">optional</span></label>
               <input type="text" id="scentName" placeholder="e.g. Bleu de Chanel">
             </div>
+            <!-- Medium -->
+            <div class="form-group">
+              <label for="perfumeMedium">Medium <span class="hint">optional</span></label>
+              <select id="perfumeMedium">
+                <option value="">— not specified —</option>
+                <option value="Spray Perfume (EDP)">Spray Perfume (EDP)</option>
+                <option value="Spray Perfume (EDT)">Spray Perfume (EDT)</option>
+                <option value="Spray Perfume (EDC)">Spray Perfume (EDC)</option>
+                <option value="Extrait de Parfum">Extrait de Parfum</option>
+                <option value="Attar / Oil">Attar / Oil</option>
+                <option value="Solid Perfume">Solid Perfume</option>
+                <option value="Body Mist">Body Mist</option>
+              </select>
+              <span class="input-description">Concentration and format change how long and how loudly a composition reads.</span>
+            </div>
           </div>
 
           <hr class="divider">
 
-          <!-- Scent Type -->
-          <div class="form-group" style="margin-bottom: var(--space-5)">
-            <label>Scent Family <span class="hint">tap to select, tap again to clear</span></label>
-            <div class="scent-types" id="scentTypeBtns">
-              <button type="button" class="scent-type-btn" data-value="Floral">🌸 Floral</button>
-              <button type="button" class="scent-type-btn" data-value="Woody">🪵 Woody</button>
-              <button type="button" class="scent-type-btn" data-value="Oriental">🌙 Oriental</button>
-              <button type="button" class="scent-type-btn" data-value="Fresh">💧 Fresh</button>
-              <button type="button" class="scent-type-btn" data-value="Citrus">🍋 Citrus</button>
-              <button type="button" class="scent-type-btn" data-value="Aquatic">🌊 Aquatic</button>
-              <button type="button" class="scent-type-btn" data-value="Gourmand">🍫 Gourmand</button>
-              <button type="button" class="scent-type-btn" data-value="Spicy">🌶️ Spicy</button>
-              <button type="button" class="scent-type-btn" data-value="Fougère">🌿 Fougère</button>
-              <button type="button" class="scent-type-btn" data-value="Chypre">🍂 Chypre</button>
+          <!-- Scent Families: multi-select, a perfume can sit in several -->
+          <div class="form-group">
+            <label id="scentTypeLabel">Scent Families <span class="hint">select all that apply</span></label>
+            <div class="scent-types" id="scentTypeBtns" role="group" aria-labelledby="scentTypeLabel">
+              <button type="button" class="scent-type-btn" aria-pressed="false" data-value="Floral">🌸 Floral</button>
+              <button type="button" class="scent-type-btn" aria-pressed="false" data-value="Woody">🪵 Woody</button>
+              <button type="button" class="scent-type-btn" aria-pressed="false" data-value="Oriental">🌙 Oriental</button>
+              <button type="button" class="scent-type-btn" aria-pressed="false" data-value="Fresh">💧 Fresh</button>
+              <button type="button" class="scent-type-btn" aria-pressed="false" data-value="Citrus">🍋 Citrus</button>
+              <button type="button" class="scent-type-btn" aria-pressed="false" data-value="Fruity">🍑 Fruity</button>
+              <button type="button" class="scent-type-btn" aria-pressed="false" data-value="Aquatic">🌊 Aquatic</button>
+              <button type="button" class="scent-type-btn" aria-pressed="false" data-value="Gourmand">🍫 Gourmand</button>
+              <button type="button" class="scent-type-btn" aria-pressed="false" data-value="Sweet">🍬 Sweet</button>
+              <button type="button" class="scent-type-btn" aria-pressed="false" data-value="Spicy">🌶️ Spicy</button>
+              <button type="button" class="scent-type-btn" aria-pressed="false" data-value="Fougère">🌿 Fougère</button>
+              <button type="button" class="scent-type-btn" aria-pressed="false" data-value="Chypre">🍂 Chypre</button>
             </div>
-            <input type="hidden" id="scentType">
-          </div>
-
-          <!-- Medium -->
-          <div class="form-group" style="margin-bottom: var(--space-5)">
-            <label for="perfumeMedium">Medium <span class="hint">optional</span></label>
-            <select id="perfumeMedium">
-              <option value="">— not specified —</option>
-              <option value="Spray Perfume (EDP)">Spray Perfume (EDP)</option>
-              <option value="Spray Perfume (EDT)">Spray Perfume (EDT)</option>
-              <option value="Spray Perfume (EDC)">Spray Perfume (EDC)</option>
-              <option value="Extrait de Parfum">Extrait de Parfum</option>
-              <option value="Attar / Oil">Attar / Oil</option>
-              <option value="Solid Perfume">Solid Perfume</option>
-              <option value="Body Mist">Body Mist</option>
-            </select>
-            <span class="input-description">Concentration and format change how long and how loudly a composition reads.</span>
+            <span class="input-description" id="scentTypeSummary" aria-live="polite">None selected — optional.</span>
           </div>
 
           <hr class="divider">
 
-          <!-- Top Notes -->
-          <div class="form-group full" style="margin-bottom: var(--space-4)">
-            <label>Top Notes <span class="hint">press Enter or comma to add</span></label>
-            <div class="tag-input-wrap" id="topWrap">
-              <input type="text" id="topInput" placeholder="e.g. bergamot, lemon, grapefruit" autocomplete="off">
+          <!-- Notes: stacked, or top / heart / base side by side when the card is wide -->
+          <div class="notes-grid">
+            <!-- Top Notes -->
+            <div class="form-group full">
+              <label>Top Notes <span class="hint">press Enter or comma to add</span></label>
+              <div class="tag-input-wrap" id="topWrap">
+                <input type="text" id="topInput" placeholder="e.g. bergamot, lemon, grapefruit" autocomplete="off">
+              </div>
+              <span class="input-description">First impression — lasts 15–30 min. Most noticeable on first spray.</span>
             </div>
-            <span class="input-description">First impression — lasts 15–30 min. Most noticeable on first spray.</span>
+
+            <!-- Middle Notes -->
+            <div class="form-group full">
+              <label>Heart / Middle Notes <span class="hint">press Enter or comma to add</span></label>
+              <div class="tag-input-wrap" id="midWrap">
+                <input type="text" id="midInput" placeholder="e.g. rose, jasmine, iris" autocomplete="off">
+              </div>
+              <span class="input-description">The core character — emerges after 30 min, lasts 2–4 hrs.</span>
+            </div>
+
+            <!-- Base Notes -->
+            <div class="form-group full">
+              <label>Base Notes <span class="hint">press Enter or comma to add</span></label>
+              <div class="tag-input-wrap" id="baseWrap">
+                <input type="text" id="baseInput" placeholder="e.g. sandalwood, musk, amber" autocomplete="off">
+              </div>
+              <span class="input-description">The dry-down — develops after 1 hr, can last 6+ hrs.</span>
+            </div>
           </div>
 
-          <!-- Middle Notes -->
-          <div class="form-group full" style="margin-bottom: var(--space-4)">
-            <label>Heart / Middle Notes <span class="hint">press Enter or comma to add</span></label>
-            <div class="tag-input-wrap" id="midWrap">
-              <input type="text" id="midInput" placeholder="e.g. rose, jasmine, iris" autocomplete="off">
-            </div>
-            <span class="input-description">The core character — emerges after 30 min, lasts 2–4 hrs.</span>
-          </div>
-
-          <!-- Base Notes -->
-          <div class="form-group full" style="margin-bottom: var(--space-5)">
-            <label>Base Notes <span class="hint">press Enter or comma to add</span></label>
-            <div class="tag-input-wrap" id="baseWrap">
-              <input type="text" id="baseInput" placeholder="e.g. sandalwood, musk, amber" autocomplete="off">
-            </div>
-            <span class="input-description">The dry-down — develops after 1 hr, can last 6+ hrs.</span>
-          </div>
-
+          <div class="form-actions">
           <button type="submit" class="btn-primary">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
             Save &amp; Log Entry
           </button>
           <button type="button" class="btn-secondary" id="clearBtn">Clear Form</button>
+          </div>
         </form>
       </div>
     </div>
 
     <!-- RIGHT: Prediction -->
     <div class="prediction-panel">
-      <div class="card">
+      <div class="card" id="scoreCard">
         <p class="section-heading">Live Prediction</p>
         <div id="scoreDisplay" class="score-empty">Fill in notes to see your predicted score</div>
       </div>
@@ -151,44 +221,9 @@
         <div class="breakdown" id="breakdown"></div>
       </div>
 
-      <!-- Backup & restore -->
-      <div class="card">
-        <p class="section-heading">Backup &amp; Restore</p>
-        <p class="backup-note">
-          Your log lives in this browser only. Clearing site data, switching device or
-          using a private window loses it. Download the four CSVs regularly, and upload
-          them here to carry on where you left off.
-        </p>
-        <div class="backup-actions">
-          <button type="button" class="btn-secondary" id="downloadAllBtn" style="margin-top:0">
-            Download my log (4 CSVs)
-          </button>
-          <!-- The input is nested, so no `for` attribute: pairing both ways makes
-               some browsers open the file dialog twice. -->
-          <label class="file-drop" id="fileDrop">
-            <input type="file" id="importInput" accept=".csv,text/csv" multiple>
-            Drop your CSVs here, or click to choose<br>
-            <span class="cell-faint">perfumes · combinations · ratings · predictions</span>
-          </label>
-        </div>
-        <div class="transfer-report" id="transferReport"></div>
-      </div>
-
-      <div class="card" style="background: var(--color-surface-offset)">
-        <p class="section-heading">How It Works</p>
-        <p style="font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.7;">
-          This page still runs the <strong>placeholder</strong> scorer: it matches notes
-          against a seed like/dislike list plus whatever it can infer from perfumes you
-          have rated 4+ or 2−. It fits no parameters, so it cannot be validated — treat
-          the number as a rough guide, not a measurement.
-        </p>
-        <p style="font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.7; margin-top: var(--space-3);">
-          The real model is being built in Python and will be exported here. What matters
-          now is that <strong>your actual ratings</strong> are recorded — they are the
-          training data, and predictions are never learned from.
-        </p>
-      </div>
     </div>
+
+    </div><!-- /.log-top -->
 
     <!-- BOTTOM: Log -->
     <div class="log-section">
@@ -204,7 +239,7 @@
                 <th>#</th>
                 <th>Brand</th>
                 <th>Scent</th>
-                <th>Type</th>
+                <th>Families</th>
                 <th>Top Notes</th>
                 <th>Heart Notes</th>
                 <th>Base Notes</th>
@@ -212,10 +247,11 @@
                 <th>Your Rating</th>
                 <th>Verdict</th>
                 <th>Logged</th>
+                <th class="th-actions"><span class="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody id="logBody">
-              <tr><td colspan="11" class="empty-log">No entries yet — log your first perfume above ✨</td></tr>
+              <tr><td colspan="12" class="empty-log">No entries yet — log your first perfume above ✨</td></tr>
             </tbody>
           </table>
         </div>
@@ -226,7 +262,7 @@
 
   <!-- PREFERENCES VIEW -->
   <div class="main-content single-column" id="viewPreferences" data-view="preferences" hidden>
-    <div class="card">
+    <div class="card prefs-card">
       <h2 class="card-title">Your base smell palette</h2>
       <p class="card-subtitle">
         Optional. Tell the model what you already know you like, so it has somewhere to
@@ -321,17 +357,259 @@
         included in the backup as <code>preferences.csv</code> — the button below
         downloads the <strong>whole log</strong>, not just the palette, because a
         partial export that looked like a backup would be the more dangerous thing to
-        keep. Restore it from the <em>Backup &amp; Restore</em> card on the Log tab.
+        keep. Restore it from the <a href="#backup">Backup</a> page.
       </p>
       <button type="button" class="btn-secondary" id="downloadPaletteBtn" style="margin-top:0">
         Download my log (5 CSVs, palette included)
       </button>
     </div>
   </div>
+  <!-- LAYERING VIEW: combinations — two logged perfumes worn together -->
+  <div class="main-content single-column layering-view" id="viewLayering" data-view="layering" hidden>
+    <div class="card layer-card">
+      <h2 class="card-title">Layer two perfumes</h2>
+      <p class="card-subtitle">
+        Wearing two of your perfumes together? Log the pair here and rate it like any
+        other entry. Pairs are saved separately from single perfumes, so they never
+        change the predictions on the Log page.
+      </p>
+
+      <p class="callout" id="layerNeedMore" hidden>
+        You need at least two perfumes in your log to make a pair.
+        <a href="#log">Log a perfume</a> first.
+      </p>
+
+      <form id="layerForm" novalidate hidden>
+        <div class="layer-pickers">
+          <div class="form-group">
+            <label for="layerA">Perfume A</label>
+            <select id="layerA"></select>
+          </div>
+          <button type="button" class="btn-icon layer-swap" id="layerSwap" title="Swap A and B" aria-label="Swap A and B">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          </button>
+          <div class="form-group">
+            <label for="layerB">Perfume B</label>
+            <select id="layerB"></select>
+          </div>
+        </div>
+
+        <div class="layer-members" id="layerMembers"></div>
+
+        <div class="layer-options">
+          <div class="form-group">
+            <label id="layerFirstLabel">Applied first <span class="hint">order changes how a pair reads</span></label>
+            <div class="segmented layer-first" role="radiogroup" aria-labelledby="layerFirstLabel">
+              <input type="radio" name="layerFirst" id="layerFirstNone" value="" checked>
+              <label for="layerFirstNone" class="seg-neutral">Together / not sure</label>
+              <input type="radio" name="layerFirst" id="layerFirstAInput" value="a">
+              <label for="layerFirstAInput" class="seg-like" id="layerFirstA">A first</label>
+              <input type="radio" name="layerFirst" id="layerFirstBInput" value="b">
+              <label for="layerFirstBInput" class="seg-like" id="layerFirstB">B first</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="layerComment">Note <span class="hint">optional</span></label>
+            <input type="text" id="layerComment" placeholder="e.g. one spray each, wrists vs neck">
+          </div>
+        </div>
+
+        <div class="layer-guess" id="layerGuess" aria-live="polite"></div>
+
+        <button type="submit" class="btn-primary" id="saveLayerBtn" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg>
+          Save pair
+        </button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="log-header">
+        <p class="section-heading" style="margin:0">Layering Log (<span id="layerCount">0</span> pairs)</p>
+        <p class="log-stats" id="layerStats"></p>
+      </div>
+      <div class="log-wrap">
+        <table id="pairTable" class="card-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>1st</th>
+              <th>2nd</th>
+              <th>Note</th>
+              <th>Guess</th>
+              <th>Your Rating</th>
+              <th>Verdict</th>
+              <th>Logged</th>
+              <th class="th-actions"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody id="layerLog"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- BACKUP VIEW -->
+  <div class="main-content single-column" id="viewBackup" data-view="backup" hidden>
+    <div class="card backup-card">
+      <h2 class="card-title">Backup &amp; Restore</h2>
+      <p class="card-subtitle">
+        Your log lives in this browser only. Clearing site data, switching device or
+        using a private window loses it. Download the CSVs regularly, and upload them
+        here to carry on where you left off.
+      </p>
+
+      <div class="backup-grid">
+        <section class="backup-step">
+          <p class="section-heading">Back up</p>
+          <p class="backup-note">
+            Five CSVs — your perfumes, pairs, ratings, predictions and declared palette.
+            Keep them together; a partial set is not a backup.
+          </p>
+          <button type="button" class="btn-primary" id="downloadAllBtn" style="margin-top:0">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download my log (5 CSVs)
+          </button>
+        </section>
+
+        <section class="backup-step">
+          <p class="section-heading">Restore</p>
+          <p class="backup-note">
+            Upload a backup to replace what is in this browser. Nothing changes until
+            you confirm.
+          </p>
+          <!-- The input is nested, so no `for` attribute: pairing both ways makes
+               some browsers open the file dialog twice. -->
+          <label class="file-drop" id="fileDrop">
+            <input type="file" id="importInput" accept=".csv,text/csv" multiple>
+            Drop your CSVs here, or click to choose<br>
+            <span class="cell-faint">perfumes · combinations · ratings · predictions · preferences</span>
+          </label>
+          <div class="transfer-report" id="transferReport"></div>
+        </section>
+      </div>
+    </div>
+  </div>
 </main>
 </div>
 
-<div class="toast" id="toast"></div>
+<!-- Appearance dialog: centred, preview beside the settings on wide screens. -->
+<dialog class="theme-panel" id="themePanel" aria-labelledby="themeTitle">
+  <div class="theme-panel-inner">
+    <header class="theme-panel-head">
+      <h2 id="themeTitle">Appearance</h2>
+      <button type="button" class="btn-icon" id="themeClose" aria-label="Close appearance settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </header>
+
+    <div class="theme-body">
+    <!-- Live preview: left column on wide screens, stays in view while the
+         settings column scrolls. Built from the page's
+         real classes, so it shows exactly what each setting does. -->
+    <section class="theme-preview" aria-label="Preview">
+      <div class="theme-preview-card">
+        <div class="theme-preview-top">
+          <div>
+            <span class="theme-preview-brand">Dior</span>
+            <p class="theme-preview-title">Sauvage</p>
+          </div>
+          <div class="theme-preview-score">
+            <span class="theme-preview-value">4.3</span>
+            <span class="theme-preview-stars">★★★★☆</span>
+          </div>
+        </div>
+        <div class="theme-preview-row">
+          <span class="family-chip">Fresh</span><span class="family-chip">Woody</span>
+        </div>
+        <div class="theme-preview-layers">
+          <span class="theme-preview-layer">Top</span><span class="tag tag-top">Bergamot</span>
+          <span class="theme-preview-layer">Heart</span><span class="tag tag-mid">Lavender</span>
+          <span class="theme-preview-layer">Base</span><span class="tag tag-base">Vetiver</span>
+        </div>
+        <div class="theme-preview-row">
+          <span class="badge badge-love">Love it</span>
+          <span class="badge badge-like">Like it</span>
+          <span class="badge badge-neutral">Maybe</span>
+        </div>
+        <div class="theme-preview-row theme-preview-actions">
+          <span class="btn-primary">Save &amp; Log</span>
+          <span class="btn-secondary">Clear</span>
+        </div>
+        <p class="theme-preview-text">Body text looks like this, with a <span class="theme-preview-link">link</span> and <span class="theme-preview-muted">muted notes</span>.</p>
+      </div>
+    </section>
+
+    <div class="theme-settings">
+    <section class="theme-section">
+      <p class="section-heading" id="themeModeLabel">Mode</p>
+      <div class="segmented theme-seg" id="themeModeSeg" role="radiogroup" aria-labelledby="themeModeLabel"></div>
+    </section>
+
+    <section class="theme-section">
+      <p class="section-heading">Theme</p>
+      <div class="theme-presets" id="themePresets"></div>
+    </section>
+
+    <section class="theme-section">
+      <p class="section-heading">Colours</p>
+      <div class="theme-colors">
+        <label class="theme-color">
+          <input type="color" id="themePrimary" value="#7c4d8a">
+          <span><strong>Main</strong><span class="theme-color-role">Heart · buttons</span><span class="cell-faint" id="themePrimaryHex"></span></span>
+        </label>
+        <label class="theme-color">
+          <input type="color" id="themeAccent" value="#c97d3a">
+          <span><strong>Accent</strong><span class="theme-color-role">Top notes</span><span class="cell-faint" id="themeAccentHex"></span></span>
+        </label>
+        <label class="theme-color">
+          <input type="color" id="themeThird" value="#437a22">
+          <span><strong>Third</strong><span class="theme-color-role">Base notes</span><span class="cell-faint" id="themeThirdHex"></span></span>
+        </label>
+      </div>
+      <p class="input-description">Picking a colour switches to Custom. Each mode adjusts it automatically so it stays readable.</p>
+    </section>
+
+    <section class="theme-section">
+      <p class="section-heading" id="themeToneLabel">Background</p>
+      <div class="segmented theme-seg" id="themeToneSeg" role="radiogroup" aria-labelledby="themeToneLabel"></div>
+    </section>
+
+    <section class="theme-section">
+      <p class="section-heading" id="themeFontLabel">Fonts</p>
+      <div class="segmented theme-seg" id="themeFontSeg" role="radiogroup" aria-labelledby="themeFontLabel"></div>
+    </section>
+
+    <section class="theme-section theme-section-split">
+      <div>
+        <p class="theme-sub" id="themeRadiusLabel">Corners</p>
+        <div class="segmented theme-seg" id="themeRadiusSeg" role="radiogroup" aria-labelledby="themeRadiusLabel"></div>
+      </div>
+      <div>
+        <p class="theme-sub" id="themeDensityLabel">Spacing</p>
+        <div class="segmented theme-seg" id="themeDensitySeg" role="radiogroup" aria-labelledby="themeDensityLabel"></div>
+      </div>
+      <div>
+        <p class="theme-sub" id="themeScaleLabel">Text size</p>
+        <div class="segmented theme-seg" id="themeScaleSeg" role="radiogroup" aria-labelledby="themeScaleLabel"></div>
+      </div>
+    </section>
+
+    <button type="button" class="btn-secondary" id="themeReset">Reset to default</button>
+    </div><!-- /.theme-settings -->
+    </div><!-- /.theme-body -->
+  </div>
+</dialog>
+
+<!-- Phone-width only: the score card sits below the long form there, so a compact
+     copy follows you while you type notes. Tapping it jumps to the full card. -->
+<button type="button" class="mobile-score" id="mobileScore" hidden aria-label="Jump to live prediction">
+  <span class="mobile-score-label">Predicted</span>
+  <span class="mobile-score-value" id="mobileScoreValue">–</span>
+  <span class="mobile-score-stars" id="mobileScoreStars"></span>
+</button>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <!-- Classic scripts, in dependency order, so the page also works opened straight
      off the filesystem (ES modules would be blocked by file:// CORS). -->
@@ -339,6 +617,7 @@
 <script src="web/js/store.js"></script>
 <script src="web/js/predict.js"></script>
 <script src="web/js/preferences.js"></script>
+<script src="web/js/layering.js"></script>
 <script src="web/js/app.js"></script>
 </body>
 </html>

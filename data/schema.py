@@ -38,11 +38,17 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 6
 
-# Versions this code can open and upgrade in place. v1 -> v2 added preferences.csv,
-# which is purely additive: a v1 log simply has no declared palette.
-UPGRADABLE_FROM = frozenset({1})
+# The version goes up with every release, so it also names the app version.
+# Versions this code can open and upgrade in place. Every upgrade so far is additive:
+#   v1 -> v2 added preferences.csv; a v1 log simply has no declared palette.
+#   v2 -> v3 lets perfume_type hold several ";"-joined scent families; a v2
+#            single-family cell is already a valid one-element v3 list.
+#   v3 -> v4 no format change: layering page, deleting entries, themes.
+#   v4 -> v5 no format change: Appearance became a centred dialog.
+#   v5 -> v6 no format change: Appearance dialog flows as one column.
+UPGRADABLE_FROM = frozenset({1, 2, 3, 4, 5})
 
 # Note lists share one CSV cell, joined by this character. Notes containing it are
 # rejected at write time rather than silently mangled at read time.
@@ -196,6 +202,20 @@ def format_notes(notes: list[str]) -> str:
     return NOTE_SEPARATOR.join(notes)
 
 
+def clean_families(value: str | list[str] | tuple[str, ...] | None) -> list[str]:
+    """Scent families -> a clean list. Accepts a list or a ``;``-joined cell.
+
+    A perfume can sit in more than one family (a woody-spicy oriental is all three),
+    so ``perfume_type`` holds a list stored in one cell, exactly like a note layer.
+    A single family is just a one-element list, so logs written before multi-family
+    support read back unchanged.
+    """
+    if value is None:
+        return []
+    items = parse_notes(value) if isinstance(value, str) else list(value)
+    return clean_notes(items, "family")
+
+
 def clean_notes(notes: list[str] | None, layer: str) -> list[str]:
     """Strict: strip, drop blanks, reject separators, de-duplicate case-insensitively.
 
@@ -270,6 +290,8 @@ class Perfume:
 
     brand: str = ""
     name: str = ""
+    # One or more scent families, ``;``-joined like a note layer. Use
+    # ``perfume_types`` for the list form.
     perfume_type: str = ""
     perfume_medium: str = ""
     # Optional. Carried through from the legacy schema's `scent_strength` so
@@ -293,7 +315,7 @@ class Perfume:
         return Perfume(
             brand=self.brand.strip(),
             name=self.name.strip(),
-            perfume_type=self.perfume_type.strip(),
+            perfume_type=format_notes(clean_families(self.perfume_type)),
             perfume_medium=self.perfume_medium.strip(),
             perfume_strength=self.perfume_strength.strip(),
             top_notes=top,
@@ -303,6 +325,10 @@ class Perfume:
             perfume_id=self.perfume_id,
             logged_at=self.logged_at,
         )
+
+    @property
+    def perfume_types(self) -> list[str]:
+        return parse_notes(self.perfume_type)
 
     @property
     def all_notes(self) -> list[str]:

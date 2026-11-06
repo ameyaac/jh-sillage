@@ -14,6 +14,9 @@
   var Predict = Sillage.Predict;
 
   var tags = { top: [], mid: [], base: [] };
+  /* Selected scent families, in the order they were picked. A perfume can sit in
+   * several (a spicy woody oriental is all three), so this is a list, not one value. */
+  var families = [];
   var pendingImport = null;
 
   function $(id) { return document.getElementById(id); }
@@ -26,20 +29,93 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  function showToast(message) {
+  /* action: optional { label, run } — shows a button (e.g. Undo) and keeps the
+   * toast up longer so there is time to press it. */
+  function showToast(message, action) {
     var toast = $('toast');
     toast.textContent = message;
+    toast.classList.toggle('has-action', !!action);
+    if (action) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'toast-action';
+      btn.textContent = action.label;
+      btn.addEventListener('click', function () {
+        toast.classList.remove('show');
+        action.run();
+      });
+      toast.appendChild(btn);
+    }
     toast.classList.add('show');
     root.clearTimeout(showToast._timer);
-    showToast._timer = root.setTimeout(function () { toast.classList.remove('show'); }, 3200);
+    showToast._timer = root.setTimeout(function () {
+      toast.classList.remove('show');
+    }, action ? 7000 : 3200);
+  }
+
+  /* ── deleting entries ────────────────────────────────────────────────────── */
+
+  function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+  /* Re-render everything a delete or undo can touch. */
+  function refreshAll() {
+    renderLog();
+    renderPrediction();
+    if (Sillage.Layering) Sillage.Layering.render();
+  }
+
+  /* Snapshot first, so Undo puts back exactly what was there — including the
+   * cascaded pairs and ratings. */
+  function deleteWithUndo(doDelete, describe) {
+    var before = Store.snapshot();
+    var removed;
+    try {
+      removed = doDelete();
+    } catch (err) {
+      showToast(err.message);
+      return;
+    }
+    refreshAll();
+    showToast(describe(removed), {
+      label: 'Undo',
+      run: function () {
+        Store.restoreSnapshot(before);
+        refreshAll();
+        showToast('Restored.');
+      }
+    });
+  }
+
+  function confirmDeletePerfume(id) {
+    var perfume = Store.perfumesById()[id];
+    if (!perfume) return;
+    var name = [perfume.brand, perfume.name].filter(Boolean).join(' ') || 'entry #' + id;
+    var impact = Store.deletionImpact(id);
+    /* Only ask when more than the row itself goes: pairs are easy to forget. */
+    if (impact.pairs) {
+      var ok = root.confirm('Delete ' + name + '?\n\nThis also deletes ' +
+        plural(impact.pairs, 'layering pair') + ' that use it, and their ratings.');
+      if (!ok) return;
+    }
+    deleteWithUndo(function () { return Store.deletePerfume(id); }, function (removed) {
+      return 'Deleted ' + name +
+        (removed.combinations ? ' and ' + plural(removed.combinations, 'pair') : '') + '.';
+    });
+  }
+
+  function deletePair(id) {
+    deleteWithUndo(function () { return Store.deleteCombination(id); }, function () {
+      return 'Pair deleted.';
+    });
   }
 
   /* ── theme ───────────────────────────────────────────────────────────────── */
 
+  /* Mode, presets and custom colours live in theme.js (loaded in <head>). This
+   * only keeps the header's quick light/dark toggle and its icon in sync. */
   function initTheme() {
     var toggle = document.querySelector('[data-theme-toggle]');
-    var rootEl = document.documentElement;
-    var mode = root.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    var Theme = Sillage.Theme;
 
     function icon(current) {
       if (!toggle) return;
@@ -48,14 +124,12 @@
         : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
     }
 
-    rootEl.setAttribute('data-theme', mode);
-    icon(mode);
+    if (!Theme) return;
+    icon(Theme.mode());
+    Theme.onChange(function (mode) { icon(mode); });
     if (toggle) {
-      toggle.addEventListener('click', function () {
-        mode = mode === 'dark' ? 'light' : 'dark';
-        rootEl.setAttribute('data-theme', mode);
-        icon(mode);
-      });
+      toggle.setAttribute('title', 'Switch light / dark');
+      toggle.addEventListener('click', function () { Theme.toggleMode(); });
     }
   }
 
@@ -71,7 +145,7 @@
   function currentPrediction() {
     return Predict.run(
       tags.top, tags.mid, tags.base,
-      $('scentType').value,
+      families,
       Store.trainingSet(),
       Store.palette(),          /* declared taste — a prior, never a training target */
       $('perfumeMedium').value
@@ -87,10 +161,12 @@
       display.className = 'score-empty';
       display.textContent = 'Fill in notes to see your predicted score';
       breakdownCard.style.display = 'none';
+      renderMobileScore(null);
       return;
     }
 
     var score = result.total;
+    renderMobileScore(score);
     var caveats = [];
     if (result.ratingsUsed === 0) {
       caveats.push(result.declarationsUsed
@@ -127,6 +203,70 @@
         '<span class="breakdown-score">' + value.toFixed(1) + '</span></div>';
     }).join('');
     breakdownCard.style.display = 'block';
+  }
+
+  /* ── mobile score pill ───────────────────────────────────────────────────── */
+
+  /* On a phone the score card is below the whole form, so you cannot see the
+   * number change as you type notes. A compact copy sits at the bottom of the
+   * screen and hides itself whenever the real card is on screen. CSS keeps it
+   * hidden entirely on wide layouts. */
+  var scoreCardVisible = false;
+
+  function renderMobileScore(score) {
+    var pill = $('mobileScore');
+    if (!pill) return;
+    pill.dataset.hasScore = score === null ? '' : '1';
+    if (score !== null) {
+      $('mobileScoreValue').textContent = score.toFixed(1);
+      $('mobileScoreStars').textContent = stars(score);
+    }
+    syncMobileScore();
+  }
+
+  function syncMobileScore() {
+    var pill = $('mobileScore');
+    if (!pill) return;
+    var onLog = !$('viewLog').hidden;
+    pill.hidden = !(pill.dataset.hasScore && onLog && !scoreCardVisible);
+  }
+
+  function initMobileScore() {
+    var pill = $('mobileScore'), card = $('scoreCard');
+    if (!pill || !card) return;
+    pill.addEventListener('click', function () {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    if ('IntersectionObserver' in root) {
+      new root.IntersectionObserver(function (entries) {
+        scoreCardVisible = entries[0].isIntersecting;
+        syncMobileScore();
+      }, { threshold: 0.4 }).observe(card);
+    }
+  }
+
+  /* ── scent families ──────────────────────────────────────────────────────── */
+
+  function renderFamilies() {
+    document.querySelectorAll('.scent-type-btn').forEach(function (btn) {
+      var on = families.indexOf(btn.dataset.value) !== -1;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    var summary = $('scentTypeSummary');
+    if (summary) {
+      summary.textContent = families.length
+        ? families.length + ' selected: ' + families.join(', ')
+        : 'None selected — optional.';
+    }
+  }
+
+  function toggleFamily(value) {
+    var index = families.indexOf(value);
+    if (index === -1) families.push(value);
+    else families.splice(index, 1);
+    renderFamilies();
+    renderPrediction();
   }
 
   /* ── tag inputs ──────────────────────────────────────────────────────────── */
@@ -195,11 +335,9 @@
   function clearForm() {
     $('brandName').value = '';
     $('scentName').value = '';
-    $('scentType').value = '';
     $('perfumeMedium').value = '';
-    document.querySelectorAll('.scent-type-btn').forEach(function (b) {
-      b.classList.remove('active');
-    });
+    families = [];
+    renderFamilies();
     ['top', 'mid', 'base'].forEach(function (layer) {
       tags[layer] = [];
       makeTagInput['redraw_' + layer]();
@@ -234,6 +372,40 @@
     return value ? esc(value) : '<span class="cell-faint">—</span>';
   }
 
+  /* Each cell carries its column name so the phone layout, which turns rows into
+   * cards, can label every value without a header row. */
+  function td(label, html, extraClass) {
+    return '<td data-label="' + esc(label) + '"' +
+      (extraClass ? ' class="' + extraClass + '"' : '') + '>' + html + '</td>';
+  }
+
+  /* A real list, not a joined string: the table shows one note per line, and the
+   * phone card layout puts them back inline with CSS. */
+  function noteList(notes, layer) {
+    if (!notes || !notes.length) return '<span class="cell-faint">—</span>';
+    return '<ul class="note-list note-list-' + layer + '">' + notes.map(function (n) {
+      return '<li>' + esc(n) + '</li>';
+    }).join('') + '</ul>';
+  }
+
+  function deleteButton(attr, id, label) {
+    return '<button type="button" class="btn-delete" ' + attr + '="' + id + '" title="' +
+      esc(label) + '" aria-label="' + esc(label) + '">' +
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>' +
+      '<path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>' +
+      '<span class="btn-delete-label">Delete</span></button>';
+  }
+
+  function familyChips(perfume) {
+    var list = Store.perfumeTypes(perfume);
+    if (!list.length) return '<span class="cell-faint">—</span>';
+    return '<span class="family-chips">' + list.map(function (f) {
+      return '<span class="family-chip">' + esc(f) + '</span>';
+    }).join('') + '</span>';
+  }
+
   function renderLog() {
     var perfumes = Store.perfumes();
     var ratings = Store.currentRatings(Store.SUBJECT_PERFUME);
@@ -249,7 +421,7 @@
       : '';
 
     if (!perfumes.length) {
-      tbody.innerHTML = '<tr><td colspan="11" class="empty-log">' +
+      tbody.innerHTML = '<tr><td colspan="12" class="empty-log">' +
         'No entries yet — log your first perfume above ✨</td></tr>';
       return;
     }
@@ -258,22 +430,31 @@
       var rating = ratings[p.perfume_id] ? ratings[p.perfume_id].rating : null;
       var predicted = predictions[p.perfume_id] ? predictions[p.perfume_id].value : null;
       return '<tr>' +
-        '<td>' + p.perfume_id + '</td>' +
-        '<td>' + cell(p.brand) + '</td>' +
-        '<td>' + cell(p.name) + '</td>' +
-        '<td>' + cell(p.perfume_type) + '</td>' +
-        '<td>' + cell(p.top_notes.join(', ')) + '</td>' +
-        '<td>' + cell(p.middle_notes.join(', ')) + '</td>' +
-        '<td>' + cell(p.base_notes.join(', ')) + '</td>' +
-        '<td>' + (predicted === null ? '<span class="cell-faint">—</span>' :
-          '<strong>' + predicted.toFixed(1) + '</strong>') + '</td>' +
-        '<td><select class="rating-select' + (rating === null ? ' is-unrated' : '') +
+        td('#', String(p.perfume_id), 'cell-id') +
+        td('Brand', cell(p.brand), 'cell-brand') +
+        td('Scent', cell(p.name), 'cell-name') +
+        td('Families', familyChips(p), 'cell-families') +
+        td('Top', noteList(p.top_notes, 'top'), 'cell-notes') +
+        td('Heart', noteList(p.middle_notes, 'mid'), 'cell-notes') +
+        td('Base', noteList(p.base_notes, 'base'), 'cell-notes') +
+        td('Predicted', predicted === null ? '<span class="cell-faint">—</span>' :
+          '<strong>' + predicted.toFixed(1) + '</strong>', 'cell-predicted') +
+        td('Your rating', '<select class="rating-select' + (rating === null ? ' is-unrated' : '') +
           '" data-perfume-id="' + p.perfume_id + '" aria-label="Your rating for ' +
-          esc(p.name || 'entry ' + p.perfume_id) + '">' + ratingOptions(rating) + '</select></td>' +
-        '<td>' + badge(rating) + '</td>' +
-        '<td>' + cell((p.logged_at || '').slice(0, 10)) + '</td>' +
+          esc(p.name || 'entry ' + p.perfume_id) + '">' + ratingOptions(rating) + '</select>',
+          'cell-rating') +
+        td('Verdict', badge(rating), 'cell-verdict') +
+        td('Logged', cell((p.logged_at || '').slice(0, 10)), 'cell-date') +
+        td('', deleteButton('data-delete-perfume', p.perfume_id,
+          'Delete ' + (p.name || 'entry ' + p.perfume_id)), 'cell-actions') +
         '</tr>';
     }).join('');
+
+    tbody.querySelectorAll('[data-delete-perfume]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        confirmDeletePerfume(Number(btn.getAttribute('data-delete-perfume')));
+      });
+    });
 
     tbody.querySelectorAll('.rating-select').forEach(function (select) {
       select.addEventListener('change', function () {
@@ -379,6 +560,7 @@
     $('importInput').value = '';
     renderLog();
     renderPrediction();
+    if (Sillage.Layering) Sillage.Layering.render();
     showToast('Restored ' + summary.perfumes + ' perfumes and ' +
       summary.rating_events + ' ratings.');
   }
@@ -412,6 +594,18 @@
     var input = $('importInput');
     input.addEventListener('change', function () { readFiles(input.files); });
 
+    /* Header restore button: open the picker right away (it must happen inside the
+     * click, or browsers block it), and show the Backup page, where the import
+     * report and the confirm step appear. */
+    $('restoreBtn').addEventListener('click', function () {
+      input.value = '';  /* so picking the same files again still fires change */
+      input.click();
+      if (root.location.hash !== '#backup') {
+        root.history.pushState(null, '', '#backup');
+        showView('backup');
+      }
+    });
+
     var drop = $('fileDrop');
     ['dragenter', 'dragover'].forEach(function (name) {
       drop.addEventListener(name, function (event) {
@@ -438,20 +632,9 @@
     makeTagInput('baseInput', 'baseWrap', 'base');
 
     document.querySelectorAll('.scent-type-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var alreadyActive = btn.classList.contains('active');
-        document.querySelectorAll('.scent-type-btn').forEach(function (b) {
-          b.classList.remove('active');
-        });
-        if (alreadyActive) {
-          $('scentType').value = '';
-        } else {
-          btn.classList.add('active');
-          $('scentType').value = btn.dataset.value;
-        }
-        renderPrediction();
-      });
+      btn.addEventListener('click', function () { toggleFamily(btn.dataset.value); });
     });
+    renderFamilies();
 
     $('perfumeMedium').addEventListener('change', renderPrediction);
     $('clearBtn').addEventListener('click', clearForm);
@@ -470,7 +653,7 @@
         perfume = Store.logPerfume({
           brand: $('brandName').value,
           name: $('scentName').value,
-          perfume_type: $('scentType').value,
+          perfume_type: families.slice(),
           perfume_medium: $('perfumeMedium').value,
           top_notes: tags.top,
           middle_notes: tags.mid,
@@ -504,12 +687,15 @@
     document.querySelectorAll('[data-view]').forEach(function (section) {
       section.hidden = section.dataset.view !== name;
     });
-    document.querySelectorAll('[data-view-target]').forEach(function (button) {
-      var active = button.dataset.viewTarget === name;
-      button.classList.toggle('active', active);
-      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    document.querySelectorAll('[data-view-target]').forEach(function (link) {
+      var active = link.dataset.viewTarget === name;
+      link.classList.toggle('active', active);
+      if (active) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
     });
     if (name === 'preferences' && Sillage.Preferences) Sillage.Preferences.render();
+    if (name === 'layering' && Sillage.Layering) Sillage.Layering.render();
+    syncMobileScore();
 
     /* Without this you land mid-page when switching from a long log to a short
      * palette, which reads as "nothing happened". */
@@ -518,24 +704,59 @@
   }
 
   function initNav() {
-    document.querySelectorAll('[data-view-target]').forEach(function (button) {
-      button.addEventListener('click', function () {
-        showView(button.dataset.viewTarget);
+    /* Real links with #hash URLs: the browser back button, bookmarks and a
+     * refresh all land on the right page, and it still works off file://. */
+    var VIEWS = ['log', 'preferences', 'layering', 'backup'];
+    function fromHash() {
+      var name = root.location.hash.replace('#', '');
+      return VIEWS.indexOf(name) === -1 ? 'log' : name;
+    }
+    document.querySelectorAll('[data-view-target]').forEach(function (link) {
+      link.addEventListener('click', function (event) {
+        event.preventDefault();
+        var name = link.dataset.viewTarget;
+        if (fromHash() !== name || !root.location.hash) {
+          root.history.pushState(null, '', '#' + name);
+        }
+        showView(name);
       });
     });
-    showView('log');
+    root.addEventListener('popstate', function () { showView(fromHash()); });
+    /* Plain in-page links like <a href="#backup"> switch views too. */
+    root.addEventListener('hashchange', function () { showView(fromHash()); });
+    showView(fromHash());
+  }
+
+  /* The sticky score panel sits just under the topbar, whose height changes with
+   * the font scale and when the menu wraps — so measure it rather than guess. */
+  function trackTopbarHeight() {
+    var bar = document.querySelector('.topbar');
+    if (!bar) return;
+    function update() {
+      document.documentElement.style.setProperty('--topbar-h', bar.offsetHeight + 'px');
+    }
+    update();
+    root.addEventListener('resize', update);
   }
 
   function init() {
     initTheme();
+    trackTopbarHeight();
     initForm();
     initTransfer();
+    initMobileScore();
     initNav();
     if (Sillage.Preferences) {
       /* A changed palette changes the live prediction and the caveats under it. */
       Sillage.Preferences.init(function () {
         renderPrediction();
         renderLog();
+      });
+    }
+    if (Sillage.Layering) {
+      Sillage.Layering.init({
+        esc: esc, badge: badge, ratingOptions: ratingOptions, stars: stars, toast: showToast,
+        deleteButton: deleteButton, deletePair: deletePair
       });
     }
     renderLog();
